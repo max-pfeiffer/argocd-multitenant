@@ -13,6 +13,12 @@ spec:
     repoURL: https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
     chart: csi-driver-nfs
     targetRevision: 4.13.4
+    helm:
+      valuesObject:
+        externalSnapshotter:
+          enabled: true
+        controller:
+          runOnControlPlane: true
   destination:
     server: https://kubernetes.default.svc
     namespace: kube-system

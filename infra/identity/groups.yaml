@@ -11,6 +11,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   realmRef:
     name: platform
@@ -26,6 +27,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   realmRef:
     name: platform
@@ -39,6 +41,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   realmRef:
     name: platform
@@ -52,6 +55,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   realmRef:
     name: platform

@@ -22,7 +22,9 @@ spec:
         kinds:
           - kind: TLSRoute
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha2   # TLSRoute is experimental-channel only
+apiVersion: gateway.networking.k8s.io/v1         # TLSRoute is v1 as of Gateway API v1.6.x;
+                                                 # v1alpha2 is no longer served (check with
+                                                 # `kubectl get crd tlsroutes.gateway.networking.k8s.io -o yaml`)
 kind: TLSRoute
 metadata:
   name: argocd-server

@@ -45,7 +45,9 @@ spec:
       enabled: false                        # Gateway API, same as the other instance
 
   controller:
-    replicas: 1
+    # No `spec.controller.replicas` in the v1beta1 CRD — see the note in install/argocd-cr.yaml.
+    sharding:
+      enabled: false
   repo:
     replicas: 1
   ha:

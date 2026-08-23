@@ -72,7 +72,11 @@ spec:
     # No `route:` block — that field is OpenShift-only (guardrail 22).
 
   controller:
-    replicas: 1                             # raise once HA is needed
+    # There is no `spec.controller.replicas` in the v1beta1 CRD — the API server rejects it with
+    # a strict-decoding error. One application controller is the default; scaling it out is
+    # `spec.controller.sharding` (enabled + replicas/minShards/maxShards), not a replica count.
+    sharding:
+      enabled: false                        # flip on once one controller cannot keep up
   repo:
     replicas: 1
   ha:

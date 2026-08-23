@@ -7,6 +7,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "8"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   secretName: keycloak-tls
   dnsNames: ["keycloak-amt.lan"]
@@ -22,6 +23,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "8"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   instances: 1
   hostname:
@@ -48,6 +50,7 @@ metadata:
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "8"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
     io.cilium/lb-ipam-ips: "192.168.20.248"
 spec:
   gatewayClassName: cilium
@@ -64,13 +67,14 @@ spec:
         kinds:
           - kind: TLSRoute
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha2
+apiVersion: gateway.networking.k8s.io/v1         # TLSRoute is v1 as of Gateway API v1.6.x
 kind: TLSRoute
 metadata:
   name: keycloak
   namespace: keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "8"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   parentRefs:
     - name: keycloak

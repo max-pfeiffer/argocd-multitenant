@@ -13,6 +13,7 @@ metadata:
   name: platform-keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   url: https://keycloak-amt.lan
   # `spec.secret` is DEPRECATED in v1.35.0 ("Use Auth instead. When Auth is set, this field is
@@ -38,6 +39,7 @@ metadata:
   name: platform
   annotations:
     argocd.argoproj.io/sync-wave: "9"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   clusterKeycloakRef: platform-keycloak    # string, not an object — unlike realmRef below
   realmName: platform

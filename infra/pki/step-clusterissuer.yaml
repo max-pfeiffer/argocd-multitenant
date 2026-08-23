@@ -5,23 +5,27 @@
 # (argocd-multitenant, argocd-infra, keycloak, tenant-gateway) and a namespaced StepIssuer would
 # need duplicating into each.
 #
-# THREE VALUES COME FROM THE CA BOOTSTRAP, not from thin air. All three are recorded in
-# infra/pki/step-ca-secrets.md when the CA is created:
+# THREE VALUES COME FROM THE CA BOOTSTRAP, not from thin air. All three are produced by the
+# procedure in infra/pki/step-ca-secrets.md when the CA is created:
 #   caBundle  - base64 of root_ca.crt (public; safe to commit)
-#   kid       - the JWK provisioner's key ID, `step ca provisioner list` (public; safe to commit)
+#   kid       - the JWK provisioner's key ID (public; safe to commit)
 #   password  - the provisioner password, delivered as a SealedSecret (never committed plain)
+#
+# The kid is a thumbprint of the provisioner's public key, so recreating the provisioner changes
+# it. If issuance suddenly fails after a CA rebuild, check the kid before anything else.
 apiVersion: certmanager.step.sm/v1beta1
 kind: StepClusterIssuer
 metadata:
   name: step-ca
   annotations:
     argocd.argoproj.io/sync-wave: "5"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   url: https://step-certificates.step-ca.svc.cluster.local
-  caBundle: <base64 of root_ca.crt, single line>
+  caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUJ2ekNDQVdXZ0F3SUJBZ0lRQjVXVkRIRGkzWm9CemFScHVJYlBXVEFLQmdncWhrak9QUVFEQWpBK01Sa3cKRndZRFZRUUtFeEJRYkdGMFptOXliU0JTYjI5MElFTkJNU0V3SHdZRFZRUURFeGhRYkdGMFptOXliU0JTYjI5MApJRU5CSUZKdmIzUWdRMEV3SGhjTk1qWXdPREl6TVRVeU9EVTJXaGNOTXpZd09ESXdNVFV5T0RVMldqQStNUmt3CkZ3WURWUVFLRXhCUWJHRjBabTl5YlNCU2IyOTBJRU5CTVNFd0h3WURWUVFERXhoUWJHRjBabTl5YlNCU2IyOTAKSUVOQklGSnZiM1FnUTBFd1dUQVRCZ2NxaGtqT1BRSUJCZ2dxaGtqT1BRTUJCd05DQUFUQ003Znk2QnpkR2xMcwpETzRpaVA2RDNOa3UxYVNPQnIwMEJCRjdEZDdZZ3ZweUNrd3VEMXcyWjljTW5BQmdPRnk0SVBHMks5MjVXU1RLCmRtamRCdmtqbzBVd1F6QU9CZ05WSFE4QkFmOEVCQU1DQVFZd0VnWURWUjBUQVFIL0JBZ3dCZ0VCL3dJQkFUQWQKQmdOVkhRNEVGZ1FVOHNiNGNQZFpuYXc1WXpLMS8vMGVsNFBvSFRJd0NnWUlLb1pJemowRUF3SURTQUF3UlFJZwpHTFpXSUJ1OUpES1MxSWxEQ0Fja0wvL21pTXIzLys5a0RZYUNwdHI1VDRnQ0lRQ2pSbjIrbmxrN1dRN2tjb3ZECkp4VVdKdXNGTzRwOEpOcEFCN2xKR1FxZG5RPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
   provisioner:
-    name: <jwk-provisioner-name>          # e.g. admin@amt.lan — from the CA bootstrap
-    kid: <jwk-provisioner-kid>
+    name: admin@amt.lan
+    kid: sHf0TIiRnkZuRCUPB_WigEGNM3Pzp_1jw9vHyaT4XKY
     passwordRef:
       name: step-certificates-provisioner-password
       namespace: step-ca

@@ -12,27 +12,64 @@ spec:
     chart: step-certificates
     targetRevision: 1.30.1
     helm:
-      values: |
-        # CRITICAL (guardrail 30): never let the chart generate a CA. inject.enabled: false plus
-        # pre-existing secrets from infra/pki/step-ca-sealedsecrets.yaml. VERIFY these keys against
-        # chart 1.30.1's values.yaml — they have moved between versions.
-        inject:
-          enabled: false
+      # The release name decides every object name below: the chart's `fullname` helper collapses
+      # to the release name when it already contains the chart name. Argo CD uses the Application
+      # name as the release name, so `step-certificates` -> fullname `step-certificates`. Renaming
+      # this Application renames the volumes' secret references and detaches them from the sealed
+      # material in infra/pki/, which is sealed to fixed names.
+      releaseName: step-certificates
+      # The chart ships a `helm.sh/hook: test` Pod. Argo CD has no test phase to run it in,
+      # so skip it rather than leave a stray Pod to be reconciled in a PSA-guarded namespace.
+      skipTests: true
+      valuesObject:
+        # CRITICAL (guardrail 30): never let the chart generate a CA. The CA is created once, out
+        # of band, and delivered as the SealedSecrets in infra/pki/step-ca-sealedsecrets.yaml.
+        #
+        # These three blocks are mutually exclusive by design — templates/configmaps.yaml hard
+        # fails with "Can not combine existingSecrets with bootstap nor inject" if existingSecrets
+        # is on together with either of the others.
         existingSecrets:
+          # NOTE THE TYPES: every field here is a BOOLEAN FLAG, not a secret name. The chart
+          # derives names from the release (`step-certificates-certs`, `-config`, `-secrets`,
+          # `-ca-password`). Passing a name here is truthy, so it "works" and silently mounts a
+          # differently-named secret than the one you wrote.
           enabled: true
-          ca: step-certificates-secrets
-          caPassword: step-certificates-ca-password
-          provisionerPassword: step-certificates-provisioner-password
+          ca: true                # mounts -ca-password and passes --password-file
+          certsAsSecret: true     # certs from a Secret, not a ConfigMap (root/intermediate certs)
+          configAsSecret: true    # ca.json + defaults.json from a Secret
+          issuer: false           # no separate certificate-issuer key
+          sshHostCa: false
+          sshUserCa: false
+          sshTemplates: false
+        bootstrap:
+          enabled: false          # the init Job that would `step ca init` a brand-new CA
+          secrets: false
+          configmaps: false
+        inject:
+          enabled: false          # the other way the chart can materialise a CA
+
         ca:
-          # A JWK provisioner is what step-issuer authenticates against — no ACME provisioner is
-          # needed, and enabling one would be dead surface. Its name, kid and password come from
-          # the CA bootstrap (infra/pki/step-ca-secrets.md) and are wired into
-          # infra/pki/step-clusterissuer.yaml.
+          # Only consumed by the bootstrap Job, which is disabled — the real provisioner
+          # (JWK, admin@amt.lan) is defined inside the ca.json carried by
+          # step-certificates-config, and its kid is wired into infra/pki/step-clusterissuer.yaml.
+          # Kept aligned so a reader does not see two different answers.
+          name: Platform Root CA
           provisioner:
-            name: <jwk-provisioner-name>
-        persistence:
-          enabled: true
-          storageClass: nfs-csi
+            name: admin@amt.lan
+          db:
+            # Storage is `ca.db.*` on this chart — there is NO top-level `persistence:` key, so a
+            # persistence block here would be silently ignored and the CA would land on emptyDir.
+            enabled: true
+            persistent: true
+            storageClass: nfs-csi   # named explicitly, not inherited from the default marker
+            size: 10Gi
+
+        # ClusterIP only: cert-manager reaches the CA in-cluster and an internal CA has no reason
+        # to be on the LAN. This is also why no address from the LB pool is budgeted for it.
+        service:
+          type: ClusterIP
+          port: 443
+          targetPort: 9000
   destination:
     server: https://kubernetes.default.svc
     namespace: step-ca

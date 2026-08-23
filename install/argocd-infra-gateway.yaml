@@ -22,7 +22,7 @@ spec:
         kinds:
           - kind: TLSRoute
 ---
-apiVersion: gateway.networking.k8s.io/v1alpha2   # TLSRoute is experimental-channel only
+apiVersion: gateway.networking.k8s.io/v1         # TLSRoute is v1 as of Gateway API v1.6.x — see install/argocd-gateway.yaml
 kind: TLSRoute
 metadata:
   name: argocd-infra-server

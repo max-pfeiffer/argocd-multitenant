@@ -10,8 +10,8 @@ metadata:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: nfs.csi.k8s.io
 parameters:
-  server: <your-nfs-server>
-  share: <your-nfs-export-path>
+  server: truenas.lan
+  share: /mnt/big-storage-pool/nfs
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
 allowVolumeExpansion: true
