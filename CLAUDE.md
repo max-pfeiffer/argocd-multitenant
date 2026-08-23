@@ -70,7 +70,7 @@ used to be listed here are now produced by the `argocd-infra` instance instead**
 |---|---|
 | A default `StorageClass` | `infra/apps/csi-driver-nfs` + `infra/storage/nfs-storageclass.yaml` |
 | An address for `Gateway` LoadBalancer services | `infra/network/cilium-lb-ippool.yaml` (`192.168.20.245–249`) |
-| cert-manager and a certificate issuer | `infra/apps/cert-manager` + `infra/apps/step-certificates` + the step-ca ACME `ClusterIssuer` |
+| cert-manager and a certificate issuer | `infra/apps/cert-manager` + `infra/apps/step-certificates` + `infra/apps/step-issuer` + the `StepClusterIssuer` |
 
 Both versions above are load-bearing enough to record and re-check on upgrade, but nothing in this file depends on a
 specific patch release: `kubectl -n kube-system exec ds/cilium -- cilium version` and
@@ -161,14 +161,13 @@ Full rationale and background for these choices is in `docs/argocd-multi-team-se
 │   ├── namespaces.yaml             # every infra namespace, with PSA labels + managed-by
 │   ├── network/
 │   │   ├── cilium-lb-ippool.yaml   # CiliumLoadBalancerIPPool 192.168.20.245–249
-│   │   ├── cilium-l2-policy.yaml   # CiliumL2AnnouncementPolicy
-│   │   └── acme-solver-gateway.yaml  # HTTP-01 challenge endpoint, infra-owned
+│   │   └── cilium-l2-policy.yaml   # CiliumL2AnnouncementPolicy
 │   ├── storage/
 │   │   └── nfs-storageclass.yaml   # the default StorageClass, backed by the NFS CSI driver
 │   ├── pki/
 │   │   ├── step-ca-secrets.md      # how the CA key material is produced — NOT the material itself
 │   │   ├── step-ca-sealedsecrets.yaml  # the CA material, sealed
-│   │   └── step-ca-clusterissuer.yaml  # cert-manager ACME ClusterIssuer pointed at step-ca
+│   │   └── step-clusterissuer.yaml # StepClusterIssuer — step-issuer against step-ca's JWK provisioner
 │   ├── database/
 │   │   └── keycloak-postgres.yaml  # CloudNativePG Cluster backing Keycloak
 │   ├── identity/                   # EDP Keycloak operator CRs — realm config as Git objects
@@ -181,6 +180,7 @@ Full rationale and background for these choices is in `docs/argocd-multi-team-se
 │       ├── csi-driver-nfs.yaml
 │       ├── cert-manager.yaml
 │       ├── step-certificates.yaml
+│       ├── step-issuer.yaml
 │       ├── cloudnative-pg.yaml
 │       ├── keycloak-operator.yaml
 │       ├── edp-keycloak-operator.yaml
@@ -261,11 +261,18 @@ patches:
   - path: manager-patch.yaml
 ```
 
-Upstream is a kubebuilder scaffold, so it applies its own `namePrefix` and the manager Deployment ends up as something
-like `argocd-operator-controller-manager` with a container named `manager`. **Confirm the generated names before trusting
-the patches** — `kustomize build bootstrap/operator | grep -E '^  name:|kind:'` — and fix the patch targets if upstream has
-renamed anything. A strategic-merge patch whose name does not match is silently a no-op, which here would mean an operator
-running with the wrong scope.
+Upstream is a kubebuilder scaffold, so it applies its own `namePrefix: argocd-operator-` and its own `namespace:` before
+our overlay's transformers run. **The consequence is that a resource's name at patch time is not the name you see in the
+rendered output**, so matching a patch by name is unreliable in both directions — it can fail to match, and it can match
+something you did not mean. Both patches therefore carry an explicit `target:` selector in `kustomization.yaml` and are
+selected by *kind*, of which the base has exactly one each. The `metadata.name` in each patch body is documentation only.
+
+Re-verify after any SHA bump that the selectors still hit exactly one resource, and that the container is still called
+`manager`:
+
+```bash
+kubectl kustomize bootstrap/operator | grep -E '^kind:|^  name:|- name: manager'
+```
 
 ### `bootstrap/operator/namespace-patch.yaml`
 
@@ -393,7 +400,7 @@ metadata:
   name: argocd
   namespace: argocd-multitenant
 spec:
-  version: v<pin-this-argocd-version>       # pin the Argo CD version explicitly, never float
+  version: v3.3.10                          # the version operator v0.18.0 targets — no skew
   resourceTrackingMethod: annotation        # required: multi-namespace app IDs are <namespace>/<name>
                                             #   and blow past the 63-char label-value limit
   disableAdmin: false                       # false only until OIDC is verified, then flip to true
@@ -529,7 +536,7 @@ metadata:
   name: argocd-infra
   namespace: argocd-infra
 spec:
-  version: v<pin-this-argocd-version>       # same version as the multi-tenant instance
+  version: v3.3.10                          # identical to the multi-tenant instance, always
   resourceTrackingMethod: annotation
   disableAdmin: false                       # true once Keycloak exists and OIDC is verified
 
@@ -631,9 +638,10 @@ real dependencies on each other:
 | 0 | `csi-driver-nfs` | `https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts` | provides the CSI driver the `StorageClass` names |
 | 1 | default `StorageClass` | `infra/storage/` (this repo) | step-ca's and Postgres' PVCs need a class |
 | 2 | `cert-manager` v1.21.1 | `https://charts.jetstack.io` | its CRDs must exist before any `ClusterIssuer` |
-| 3 | `step-certificates` v1.30.1 | `https://smallstep.github.io/helm-charts/` | the CA the ACME issuer points at; needs storage (wave 1) and its sealed CA secrets (wave −2) |
-| 4 | step-ca ACME `ClusterIssuer` | `infra/pki/` (this repo) | needs cert-manager CRDs *and* a running CA |
-| 5 | `cloudnative-pg` v0.27.1 | `https://cloudnative-pg.github.io/charts` | the Postgres operator Keycloak's database needs |
+| 3 | `step-certificates` v1.30.1 | `https://smallstep.github.io/helm-charts/` | the CA itself; needs storage (wave 1) and its sealed CA secrets (wave −2) |
+| 4 | `step-issuer` v1.11.0 | `https://smallstep.github.io/helm-charts/` | the cert-manager external issuer; needs cert-manager's CRDs (2) |
+| 5 | `StepClusterIssuer` | `infra/pki/` (this repo) | needs the step-issuer CRDs (4) *and* a running CA (3) |
+| 5 | `cloudnative-pg` v0.27.1 | `https://cloudnative-pg.github.io/charts` | the Postgres operator Keycloak's database needs; independent of the PKI chain, so it shares wave 5 |
 | 6 | Keycloak operator + EDP Keycloak operator | `https://github.com/keycloak/keycloak-k8s-resources`, `https://epam.github.io/edp-helm-charts/stable` | independent of each other; both must precede any Keycloak object |
 | 7 | Postgres `Cluster` for Keycloak | `infra/database/` (this repo) | needs the CNPG operator (5) and storage (1) |
 | 8 | `Keycloak` instance | `infra/apps/keycloak.yaml` | needs its database (7), a certificate (4) and the operator (6) |
@@ -708,12 +716,10 @@ spec:
 | 192.168.20.246 | `argocd` (multi-tenant control plane) gateway |
 | 192.168.20.247 | tenant gateway |
 | 192.168.20.248 | Keycloak |
-| 192.168.20.249 | ACME HTTP-01 solver gateway (`infra/network/acme-solver-gateway.yaml`) |
+| 192.168.20.249 | spare |
 
-**The pool is fully allocated — there is no spare.** The solver gateway is not optional and not
-shareable with the tenant gateway: pointing the `ClusterIssuer` at a gateway the *other* instance
-owns would make wave 4 unsatisfiable on a fresh cluster and would couple the two instances
-(guardrail 29). Widen the block before adding anything else that needs an address.
+One spare address. It was briefly consumed by an ACME HTTP-01 solver gateway; moving to step-issuer
+removed the need for any solver endpoint at all, which is a second reason to prefer it here.
 
 step-ca stays `ClusterIP` — cert-manager reaches it in-cluster, and an internal CA has no reason to be on the LAN.
 Pin the assignments with `spec.addresses` / `loadBalancerIP` on the services rather than letting IPAM hand them out in
@@ -776,39 +782,41 @@ This is the payoff of putting sealed-secrets first: the CA bootstrap is a normal
 `kubectl create secret` someone has to remember to run at exactly the right moment, and re-creating the cluster replays
 it from Git.
 
-Then the ACME issuer, `infra/pki/step-ca-clusterissuer.yaml`:
+Then the issuer, `infra/pki/step-clusterissuer.yaml`. **This is step-issuer, not ACME** — see below
+for why:
 
 ```yaml
-apiVersion: cert-manager.io/v1
-kind: ClusterIssuer
+apiVersion: certmanager.step.sm/v1beta1
+kind: StepClusterIssuer
 metadata:
-  name: step-ca-acme
+  name: step-ca
 spec:
-  acme:
-    server: https://step-certificates.step-ca.svc.cluster.local/acme/acme/directory
-    email: platform@example.com
-    privateKeySecretRef:
-      name: step-ca-acme-account-key
-    caBundle: <base64 of the step-ca root certificate>   # step-ca is not publicly trusted
-    solvers:
-      - http01:
-          gatewayHTTPRoute:                              # Gateway API solver, not ingress
-            parentRefs:
-              - name: acme-solver          # infra-owned; see infra/network/acme-solver-gateway.yaml
-                namespace: cert-manager
-                kind: Gateway
+  url: https://step-certificates.step-ca.svc.cluster.local
+  caBundle: <base64 of root_ca.crt>
+  provisioner:
+    name: <jwk-provisioner-name>
+    kid: <jwk-provisioner-kid>
+    passwordRef:
+      name: step-certificates-provisioner-password
+      namespace: step-ca
+      key: password
 ```
 
-This requires the ACME provisioner to be enabled in step-ca's configuration. Every `certificateRefs` in this repo —
-both instances' gateways and the tenant listeners — resolves back to this issuer.
+**Why step-issuer rather than cert-manager's built-in ACME.** ACME was the obvious first choice and
+it does not survive this environment. HTTP-01 validation makes step-ca fetch
+`http://<hostname>/.well-known/acme-challenge/<token>`; with internal `.lan` names on per-hostname
+LoadBalancer IPs, each hostname resolves to its *own* gateway, so no shared solver endpoint can ever
+receive the challenge — and a per-gateway HTTP listener still could not issue the wildcard
+certificates the tenant listeners need. DNS-01 would work but requires the `.lan` zone to expose an
+API cert-manager supports. step-issuer sidesteps the question: cert-manager hands it a
+`CertificateRequest` and it asks step-ca's JWK provisioner to sign. No challenge, no DNS dependency,
+no port-80 reachability, wildcards included. It also removes a load-balancer address from the budget
+— `.249` is spare again.
 
-> **Open issue: HTTP-01 does not survive internal `.lan` names on per-hostname LoadBalancer IPs.** step-ca validates by
-> fetching `http://<hostname>/.well-known/acme-challenge/<token>`. `argocd-amt.lan` has to resolve to its own gateway
-> (`192.168.20.246`) for real traffic, so the challenge arrives there on port 80 — not at the solver gateway on `.249`,
-> which nothing resolves to. On top of that, HTTP-01 cannot issue the wildcard certificates the tenant listeners need.
-> The realistic fixes are **step-issuer** (smallstep's cert-manager external issuer against step-ca's JWK provisioner —
-> no challenge, no DNS dependency) or **DNS-01** if the `.lan` zone has an API cert-manager supports. Both are decisions
-> about your DNS setup, so this file does not pick one; nothing else in the bootstrap is blocked until wave 4.
+Every `certificateRefs` in this repo — both control-plane gateways, the Keycloak gateway, and the
+tenant listeners — names this issuer with `kind: StepClusterIssuer, group: certmanager.step.sm`.
+It is cluster-scoped because certificates are requested from four namespaces; a namespaced
+`StepIssuer` would have to be duplicated into each.
 
 ## Exposing ArgoCD and team workloads (Gateway API)
 
@@ -1322,7 +1330,7 @@ certificate issuer, an identity provider — so it goes first, and it comes up w
 3. `argocd-infra` namespace + `install/argocd-infra-cr.yaml`. Reach it by `kubectl port-forward`; there is no LB address
    or certificate yet.
 4. `infra/projects/infra-project.yaml`, then `bootstrap/infra-root-app.yaml`. Sync waves −1→7 bring up LB-IPAM, NFS CSI,
-   the default `StorageClass`, cert-manager, step-ca, the ACME `ClusterIssuer`, then Keycloak.
+   the default `StorageClass`, cert-manager, step-ca, step-issuer and its `StepClusterIssuer`, then Keycloak.
 5. `install/argocd-infra-gateway.yaml` — now there is an address and a certificate, so the port-forward can stop.
 6. Keycloak realm and OIDC clients (`argocd`, `argocd-infra`) via the EDP operator, from `infra/`.
 7. `argocd-multitenant` namespace + `install/argocd-cr.yaml` + `install/argocd-gateway.yaml`.
@@ -1371,7 +1379,7 @@ lands in `<team>-apps` under the right project and deploys into `<team>`, then a
 `argocd-rbac-cm`, `argocd-cmd-params-cm` or `argocd-secret` — the operator reverts them, usually right after you've
 convinced yourself the change worked.
 
-**Upgrade Argo CD:** bump `spec.version` in `install/argocd-cr.yaml` and re-apply. **Upgrade the operator:** bump the
+**Upgrade Argo CD:** bump `spec.version` in **both** `install/argocd-cr.yaml` and `install/argocd-infra-cr.yaml` — they must not drift apart — and re-apply each. Check the operator's compatibility matrix first: the current pin, v3.3.10, is what operator v0.18.0 targets, so moving one without the other reintroduces skew. **Upgrade the operator:** bump the
 `?ref=` commit SHA and the image digest in `bootstrap/operator/kustomization.yaml`, re-render `rendered.yaml`, review the
 diff (RBAC and CRD changes especially), then `kubectl apply --server-side --force-conflicts`. Back up the `ArgoCD` CR
 first — nothing gates a breaking CRD change for you now. Do the two upgrades separately, and check the operator's
@@ -1451,7 +1459,7 @@ workload fit without recording why.
 10. `spec.disableAdmin` stays `true` once OIDC is verified. Only flip it back for break-glass recovery, and flip it off again afterward.
 11. `spec.server.insecure` stays `false`; ArgoCD is always reached over TLS. This holds however it is exposed — if a routing setup is awkward to terminate correctly, fix the routing, never drop the server to plaintext.
 12. Secrets are committed only in sealed form, anywhere in this repo or a team repo. Sealed Secrets is the mechanism — a `SealedSecret` in Git, never a plaintext `Secret`, and never a value pasted into a values block. The OIDC client secrets live in their own labelled `Secret`s produced by unsealing, never in `argocd-secret`.
-13. Pin every version explicitly: the operator manifests via a `?ref=<commit-sha>` on the Kustomize base and its image via `sha256:` digest, and Argo CD via `spec.version` on the CR. Never a floating tag, never a branch ref, never `latest`. A moved tag must not be able to change what a re-render produces.
+13. Pin every version explicitly: the operator manifests via a `?ref=<commit-sha>` on the Kustomize base and its image via `sha256:` digest, and Argo CD via `spec.version` on both CRs, which must always carry the identical value. `spec.version` takes an exact release tag or, for a stronger pin, a digest — the operator composes any value containing `:` as `image@sha256:…`. An exact tag is the floor; prefer the digest where the extra opacity is worth it, and record the other form in a comment either way. Never a floating tag, never a branch ref, never `latest`. Nothing that a re-render or a re-push could quietly change underneath you.
 14. The per-team root `Application` (`platform/root-apps/<team>-root-app.yaml`) is platform-owned — teams commit `Application` manifests inside the path it watches, they never edit the root `Application` object itself.
 15. Never hand-edit or ship manifests for `argocd-cm`, `argocd-rbac-cm`, `argocd-cmd-params-cm` or `argocd-secret`. They are operator-owned and reverted on reconcile. Change the `ArgoCD` CR instead; use `spec.extraConfig` only for `argocd-cm` keys the CRD genuinely doesn't expose.
 16. `spec.sourceNamespaces` on the `ArgoCD` CR is an explicit literal list of team `-apps` namespaces. Never `"*"`, never a glob (`team-*`) or regex (`/^team-.*$/`) — the operator expands both at reconcile time, so a future namespace can silently join the allowlist.

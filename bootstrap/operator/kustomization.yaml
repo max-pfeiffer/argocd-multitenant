@@ -4,14 +4,30 @@ kind: Kustomization
 resources:
   # Pinned to an immutable commit SHA, not a tag. Tags can be moved; `?ref=v0.x.y` would then
   # resolve to different content on a later render with no diff in this file. (Guardrail 13)
-  - github.com/argoproj-labs/argocd-operator/config/default?ref=<pin-this-commit-sha>
+  #
+  # 9745824 == release v0.18.0 (2026-05-29), "chore: release 0.18.0 (#2188)".
+  # Record the tag in this comment when you bump the SHA — the SHA alone tells a reviewer nothing.
+  - github.com/argoproj-labs/argocd-operator/config/default?ref=9745824a8b4b4aa3129de27e31514ddebde93b9e
 
 namespace: argocd-operator          # renames upstream's `*-system` namespace and scopes every resource
 
 images:
+  # Upstream's config/manager/kustomization.yaml ALREADY pins a digest for this release, so this
+  # block is a deliberate restatement rather than a fix: it puts the exact image running on the
+  # cluster in our repo, where a reviewer sees it change. It must match the digest that v0.18.0
+  # ships, or you are running a build that release was never tested with.
   - name: quay.io/argoprojlabs/argocd-operator
-    digest: sha256:<pin-this-digest>    # digest, never a floating tag
+    digest: sha256:a09814522a72864cc10ec1be2834db63593427a9ab4779d97687a73dd30272f4
 
+# Explicit `target:` selectors, not name matching from the patch body. The base applies its own
+# `namespace:` and `namePrefix:` transformers, so what a resource is called at patch time is not
+# what you see in the rendered output — matching by name is a coin flip that fails closed at best
+# and silently no-ops at worst. Selecting by kind is unambiguous: the base has exactly one of each.
 patches:
   - path: namespace-patch.yaml
+    target:
+      kind: Namespace
   - path: manager-patch.yaml
+    target:
+      kind: Deployment
+      name: .*controller-manager

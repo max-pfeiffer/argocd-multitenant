@@ -9,7 +9,7 @@ spec:
   project: infra
   source:
     repoURL: https://github.com/keycloak/keycloak-k8s-resources
-    targetRevision: <pin-this-release-tag>
+    targetRevision: 26.7.2
     path: kubernetes
   destination:
     server: https://kubernetes.default.svc

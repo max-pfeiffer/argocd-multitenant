@@ -1,3 +1,6 @@
+# Matched by `target: {kind: Namespace}` in kustomization.yaml, not by the name below — the base
+# renames this object twice (kubebuilder's `system` -> its own `namespace:` -> ours), so name
+# matching here is unreliable. The name is kept only so the file reads as valid YAML in isolation.
 apiVersion: v1
 kind: Namespace
 metadata:

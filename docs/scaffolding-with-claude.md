@@ -65,7 +65,7 @@ goes wrong, because Claude will happily leave `example.com` in place and it look
 | `StorageClass` name | only manifests that request a PVC | `kubectl get sc` |
 | argocd-operator commit SHA | `bootstrap/operator/kustomization.yaml` `?ref=` | the operator repo's release tag → its commit SHA |
 | argocd-operator image digest | same file, `images[].digest` | `crane digest quay.io/argoprojlabs/argocd-operator:vX.Y.Z` or your registry UI |
-| Argo CD version | CR `spec.version` | the operator's compatibility matrix for the operator version above |
+| Argo CD version | `spec.version` on **both** CRs, identical | fixed: **v3.3.10** — the version operator v0.18.0 targets, so no skew. Digest form: `sha256:05d68bf2…` |
 | Per-team quota sizing | `platform/namespaces/<team>.yaml` | capacity planning |
 | **Infrastructure instance** | | |
 | `argocd-infra` hostname | `install/argocd-infra-cr.yaml`, its gateway | fixed: **`argocd-infra-amt.lan`** |
@@ -75,6 +75,8 @@ goes wrong, because Claude will happily leave `example.com` in place and it look
 | step-ca root/intermediate key material | pre-existing secrets, created out of band | your secret manager — **never chart-generated**, guardrail 30 |
 | Chart versions | each `infra/apps/*.yaml` `targetRevision` | given: cert-manager `v1.21.1`, step-certificates `1.30.1`. Pin the rest yourself |
 | CloudNativePG chart version | `infra/apps/cloudnative-pg.yaml` | given: **v0.27.1** |
+| step-ca JWK provisioner name + kid | `infra/pki/step-clusterissuer.yaml` | produced by the CA bootstrap; both public. `step ca provisioner list` |
+| Root CA bundle (base64) | `infra/pki/step-clusterissuer.yaml` `caBundle` | `base64` of `root_ca.crt` from the CA bootstrap; public |
 | Sealed Secrets version | `infra/apps/sealed-secrets.yaml` | pin a release from `github.com/bitnami/sealed-secrets` |
 | Postgres cluster sizing + backup target | `infra/database/keycloak-postgres.yaml` | CNPG `Cluster` for Keycloak — name the `storageClass` explicitly |
 | Keycloak realm groups | `infra/identity/groups.yaml` | `platform-admins` plus one `<team>-devs` per team, matching both CRs' `spec.rbac.policy` |
@@ -179,8 +181,10 @@ kubectl wait --for=condition=Established crd/argocds.argoproj.io
 kubectl -n argocd-operator rollout status deploy/argocd-operator-controller-manager
 ```
 
-The `grep` is not optional. If the patch target name did not match upstream's generated Deployment name, the patch was a
-silent no-op and you now have a namespace-scoped operator that will never reconcile your CR. Commit `rendered.yaml`.
+The `grep` is not optional. If either patch failed to select its target, you now have a namespace-scoped operator that
+will never reconcile either CR. Both patches match by `target:` selector on *kind* rather than by name, because the base
+renames everything (`namePrefix`, `namespace`) after the patches are applied — the name in a patch body is not the name in
+the rendered output. Commit `rendered.yaml` with every change to the kustomization.
 
 ---
 
@@ -268,7 +272,8 @@ kubectl -n sealed-secrets get pods                         # wave -2
 kubectl get ciliumloadbalancerippool default-pool          # wave -1
 kubectl get sc                                             # wave 1 — exactly one default
 kubectl -n cert-manager get pods                           # wave 2
-kubectl get clusterissuer step-ca-acme                     # wave 4 — Ready=True
+kubectl -n step-ca get pods -l app.kubernetes.io/name=step-issuer   # wave 4
+kubectl get stepclusterissuer step-ca -o jsonpath='{.status.conditions}'  # wave 5 — Ready=True
 kubectl get clusters.postgresql.cnpg.io -A                 # wave 7 — Cluster in "Cluster in healthy state"
 kubectl -n keycloak get keycloaks                          # wave 8
 ```
@@ -323,7 +328,7 @@ Get SSO working on this instance before the multi-tenant one depends on the same
 ## Phase 7 — the multi-tenant ArgoCD instance
 
 Everything this instance assumed as a prerequisite now exists, courtesy of Phase 5: a default `StorageClass`, LB
-addresses, and the `step-ca-acme` `ClusterIssuer` for its gateway certificate. Its `oidcConfig` points at the same
+addresses, and the `step-ca` `StepClusterIssuer` for its gateway certificate. Its `oidcConfig` points at the same
 Keycloak realm as the infrastructure instance, with the `argocd` client rather than `argocd-infra`.
 
 Ask Claude for the CR **with `spec.sourceNamespaces` left empty for now** — the team namespaces do not exist yet, and the

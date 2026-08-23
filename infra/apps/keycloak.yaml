@@ -11,8 +11,9 @@ spec:
   secretName: keycloak-tls
   dnsNames: ["keycloak-amt.lan"]
   issuerRef:
-    name: step-ca-acme
-    kind: ClusterIssuer
+    name: step-ca
+    kind: StepClusterIssuer
+    group: certmanager.step.sm
 ---
 apiVersion: k8s.keycloak.org/v2alpha1
 kind: Keycloak

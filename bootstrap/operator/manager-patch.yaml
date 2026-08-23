@@ -1,6 +1,9 @@
-# Verify the Deployment and container names against `kustomize build bootstrap/operator` before
-# trusting this patch: a strategic-merge patch whose name does not match is a SILENT no-op, which
-# here means an operator running with the wrong scope.
+# Matched by `target: {kind: Deployment, name: .*controller-manager}` in kustomization.yaml, not by
+# the name below. The base applies `namePrefix: argocd-operator-` and its own `namespace:`, so the
+# name at patch time is not the name in the rendered output — the selector sidesteps that entirely.
+#
+# After any SHA bump, re-verify the container name and that the selector still matches exactly one:
+#   kubectl kustomize bootstrap/operator | grep -E '^kind:|^  name:|- name: manager'
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,10 +13,20 @@ spec:
     spec:
       containers:
         - name: manager
+          # `$patch: replace` replaces the whole env list instead of merging into it. This is
+          # required, not stylistic: upstream sets WATCH_NAMESPACE via
+          #   valueFrom.fieldRef: metadata.annotations['olm.targetNamespaces']
+          # — an annotation only OLM ever writes. A strategic merge of our `value:` onto that
+          # entry yields an env var with BOTH `value` and `valueFrom`, which the API server
+          # rejects outright. Replacing the list is the clean way to drop the OLM coupling.
+          #
+          # Cost of `replace`: an env var upstream adds in a future release is silently dropped.
+          # It will show up in the rendered.yaml diff on upgrade — read that diff (guardrail 13).
           env:
-            # Watch all namespaces. Nothing sets this for you: under OLM, the AllNamespaces
-            # OperatorGroup injected WATCH_NAMESPACE="". Left at the pod's own namespace, the
-            # operator quietly becomes namespace-scoped and never reconciles either ArgoCD CR.
+            - $patch: replace
+            # Watch all namespaces. Nothing sets this for you now: under OLM, the AllNamespaces
+            # OperatorGroup supplied the annotation above. Without it the operator quietly
+            # becomes namespace-scoped and never reconciles either ArgoCD CR.
             - name: WATCH_NAMESPACE
               value: ""
             - name: ARGOCD_CLUSTER_CONFIG_NAMESPACES

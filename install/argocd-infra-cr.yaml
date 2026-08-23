@@ -10,7 +10,10 @@ metadata:
   name: argocd-infra
   namespace: argocd-infra
 spec:
-  version: v<pin-this-argocd-version>       # same version as the multi-tenant instance
+  # Argo CD v3.3.10 — MUST stay identical to install/argocd-cr.yaml. One operator reconciles both
+  # instances; running them on different Argo CD versions is a debugging trap, not a feature.
+  # See the pinning note in install/argocd-cr.yaml.
+  version: v3.3.10
   resourceTrackingMethod: annotation
   disableAdmin: false                       # true once Keycloak exists and OIDC is verified
 

@@ -38,6 +38,27 @@ kubeseal --scope strict -o yaml < /tmp/step-ca-secrets.yaml > infra/pki/step-ca-
 shred -u root_ca.key intermediate_ca.key /tmp/step-ca-secrets.yaml
 ```
 
+## Record these three values for step-issuer
+
+`infra/pki/step-clusterissuer.yaml` needs all three. Only the last is secret.
+
+```bash
+# caBundle — base64 of the root cert, single line, safe to commit
+base64 -w0 root_ca.crt        # macOS: base64 -i root_ca.crt | tr -d '\n'
+
+# provisioner name and kid — public, safe to commit. Read them back once the CA is running:
+kubectl -n step-ca exec deploy/step-certificates -- step ca provisioner list \
+  | python3 -c 'import json,sys; [print(p["name"], p["key"]["kid"]) for p in json.load(sys.stdin)]'
+
+# provisioner password — SECRET. Seal it, strict scope, for the step-ca namespace:
+kubectl -n step-ca create secret generic step-certificates-provisioner-password \
+  --from-literal=password='<generated>' --dry-run=client -o yaml \
+  | kubeseal --scope strict -o yaml >> infra/pki/step-ca-sealedsecrets.yaml
+```
+
+The `kid` is a thumbprint of the provisioner's public key, so it changes if the provisioner is
+recreated — if certificates suddenly stop issuing after a CA rebuild, check the `kid` first.
+
 ## Prerequisites
 
 - The sealed-secrets controller must be running (wave -2) before step 3.

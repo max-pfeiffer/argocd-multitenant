@@ -10,7 +10,16 @@ metadata:
   name: argocd
   namespace: argocd-multitenant
 spec:
-  version: v<pin-this-argocd-version>       # pin the Argo CD version explicitly, never float
+  # Argo CD v3.3.10 — exactly the version operator v0.18.0 defaults to and is tested against,
+  # so there is no operator/app version skew to reason about. Keep it that way: bump this only
+  # together with a deliberate check of the operator's compatibility matrix.
+  #
+  # An exact release tag, not a digest. `spec.version` accepts either — the operator composes any
+  # value containing ':' as `image@sha256:...` — and the digest for this tag is
+  #   sha256:05d68bf224df7cd39713012c19226a33c374f2f3bd65df7b9088349e4ac3e6a2
+  # which is byte-identical to what operator v0.18.0 hardcodes as its default. Swap the tag for
+  # that digest if you want the stronger pin (guardrail 13); the tag is kept here for readability.
+  version: v3.3.10
   resourceTrackingMethod: annotation        # required: multi-namespace app IDs are <namespace>/<name>
                                             #   and blow past the 63-char label-value limit
   disableAdmin: false                       # false only until OIDC is verified, then flip to true

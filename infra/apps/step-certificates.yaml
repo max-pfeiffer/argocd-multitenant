@@ -24,10 +24,12 @@ spec:
           caPassword: step-certificates-ca-password
           provisionerPassword: step-certificates-provisioner-password
         ca:
-          # The ACME provisioner the step-ca-acme ClusterIssuer depends on.
+          # A JWK provisioner is what step-issuer authenticates against — no ACME provisioner is
+          # needed, and enabling one would be dead surface. Its name, kid and password come from
+          # the CA bootstrap (infra/pki/step-ca-secrets.md) and are wired into
+          # infra/pki/step-clusterissuer.yaml.
           provisioner:
-            acme:
-              enabled: true
+            name: <jwk-provisioner-name>
         persistence:
           enabled: true
           storageClass: nfs-csi

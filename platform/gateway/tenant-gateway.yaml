@@ -67,8 +67,10 @@ spec:
           - kind: HTTPRoute
           - kind: GRPCRoute
 ---
-# Wildcard certificates for each team's subdomain, issued by the step-ca ACME ClusterIssuer
-# that argocd-infra installs. Platform-owned: they live in the gateway namespace, not the team's.
+# Wildcard certificates for each team's subdomain, issued by the StepClusterIssuer that
+# argocd-infra installs (step-issuer against step-ca). Wildcards are a reason step-issuer was
+# chosen over ACME: HTTP-01 cannot issue them at all.
+# Platform-owned: they live in the gateway namespace, not the team's.
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
@@ -78,8 +80,9 @@ spec:
   secretName: team-a-apps-tls
   dnsNames: ["*.team-a-amt.lan"]
   issuerRef:
-    name: step-ca-acme
-    kind: ClusterIssuer
+    name: step-ca
+    kind: StepClusterIssuer
+    group: certmanager.step.sm
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -90,8 +93,9 @@ spec:
   secretName: team-b-apps-tls
   dnsNames: ["*.team-b-amt.lan"]
   issuerRef:
-    name: step-ca-acme
-    kind: ClusterIssuer
+    name: step-ca
+    kind: StepClusterIssuer
+    group: certmanager.step.sm
 ---
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -102,5 +106,6 @@ spec:
   secretName: team-c-apps-tls
   dnsNames: ["*.team-c-amt.lan"]
   issuerRef:
-    name: step-ca-acme
-    kind: ClusterIssuer
+    name: step-ca
+    kind: StepClusterIssuer
+    group: certmanager.step.sm
