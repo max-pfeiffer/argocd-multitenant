@@ -20,3 +20,10 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=false     # namespaces come from infra/namespaces.yaml, with PSA labels
+      # REQUIRED, not a preference. Client-side apply stores the whole object in the
+      # kubectl.kubernetes.io/last-applied-configuration annotation, and this chart's CRDs are
+      # far larger than the 256 KiB an annotation can hold:
+      #   CustomResourceDefinition "poolers.postgresql.cnpg.io" is invalid:
+      #   metadata.annotations: Too long: may not be more than 262144 bytes
+      # The operator install hits the same wall for the same reason (see CLAUDE.md).
+      - ServerSideApply=true

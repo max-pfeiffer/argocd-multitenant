@@ -14,6 +14,22 @@ spec:
                                   # against THIS version's CRDs — ClusterKeycloak and
                                   # ClusterKeycloakRealm are v1alpha1, KeycloakClient and
                                   # KeycloakRealmGroup are v1. Re-validate on any bump.
+    helm:
+      valuesObject:
+        # NAME COLLISION: by default this chart names its Deployment and webhook Service plain
+        # `keycloak-operator` — exactly what the OFFICIAL Keycloak operator (wave 6, same
+        # namespace) calls its own. Whichever syncs second fails with
+        #   Deployment.apps "keycloak-operator" is invalid: spec.selector: field is immutable
+        # and Argo CD reports a SharedResourceWarning, because two Applications now claim one
+        # object. Renaming here rather than moving this operator to its own namespace is
+        # deliberate: EDP resolves ClusterKeycloak's auth.passwordRef in the operator's OWN
+        # namespace, which has to stay `keycloak` where the Keycloak CR and its
+        # initial-admin secret live.
+        #
+        # Cosmetic side effect: the chart already prefixes its Roles with `edp-`, so they come
+        # out double-prefixed (edp-edp-keycloak-operator-role). Harmless, and preferable to two
+        # operators fighting over one Deployment.
+        name: edp-keycloak-operator
   destination:
     server: https://kubernetes.default.svc
     namespace: keycloak
