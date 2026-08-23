@@ -1,27 +1,45 @@
-# EDP Keycloak operator CRs. VERIFY the apiVersion and field names against the operator version
-# pinned in infra/apps/edp-keycloak-operator.yaml — this group has changed between releases.
+# EDP Keycloak operator CRs — verified against chart/appVersion v1.35.0 CRDs.
+#
+# NOTE THE API VERSIONS: ClusterKeycloak and ClusterKeycloakRealm are **v1alpha1**, while the
+# namespaced kinds (KeycloakClient, KeycloakRealmGroup) are **v1**. They are not uniform, and the
+# operator will simply not recognise the wrong one.
 #
 # Everything about Keycloak's configuration is authored here, never in the admin console
 # (guardrail 33): a console edit is drift the operator may or may not revert, and it is invisible
 # in review.
-apiVersion: v1.edp.epam.com/v1
-kind: ClusterKeycloak
+apiVersion: v1.edp.epam.com/v1alpha1
+kind: ClusterKeycloak            # cluster-scoped: no metadata.namespace
 metadata:
   name: platform-keycloak
   annotations:
     argocd.argoproj.io/sync-wave: "9"
 spec:
   url: https://keycloak-amt.lan
-  secret: keycloak-admin-credentials      # SealedSecret in the operator's namespace
+  # `spec.secret` is DEPRECATED in v1.35.0 ("Use Auth instead. When Auth is set, this field is
+  # ignored") — hence auth.passwordGrant. `spec.adminType` is likewise ignored when auth is set.
+  auth:
+    passwordGrant:
+      username:
+        value: admin
+      passwordRef:
+        # The official Keycloak operator generates this secret for the `platform-keycloak`
+        # Keycloak CR. VERIFY the namespace the operator resolves it in — a cluster-scoped CR has
+        # no namespace of its own, and EDP looks the secret up in the operator's namespace
+        # (`keycloak` here, which is where both operators and Keycloak run).
+        name: platform-keycloak-initial-admin
+        key: password
+  # FOLLOW-UP, not a bootstrap blocker: bootstrapping against the master admin user is the
+  # chicken-and-egg answer, not the end state. Once the realm exists, create a dedicated
+  # service-account client for the operator and switch to auth.clientCredentials.
 ---
-apiVersion: v1.edp.epam.com/v1
-kind: ClusterKeycloakRealm
+apiVersion: v1.edp.epam.com/v1alpha1
+kind: ClusterKeycloakRealm       # cluster-scoped: no metadata.namespace
 metadata:
   name: platform
   annotations:
     argocd.argoproj.io/sync-wave: "9"
 spec:
-  clusterKeycloakRef: platform-keycloak
+  clusterKeycloakRef: platform-keycloak    # string, not an object — unlike realmRef below
   realmName: platform
   # The issuer both ArgoCD instances point at is:
   #   https://keycloak-amt.lan/realms/platform

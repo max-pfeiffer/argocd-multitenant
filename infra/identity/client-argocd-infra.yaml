@@ -1,5 +1,5 @@
 # OIDC client for the INFRASTRUCTURE ArgoCD instance.
-apiVersion: v1.edp.epam.com/v1
+apiVersion: v1.edp.epam.com/v1        # KeycloakClient/KeycloakRealmGroup are v1 (cluster kinds are v1alpha1)
 kind: KeycloakClient
 metadata:
   name: argocd-infra
@@ -12,9 +12,8 @@ spec:
     kind: ClusterKeycloakRealm
   clientId: argocd-infra
   public: false
-  secret: argocd-infra-oidc-client-secret        # SealedSecret in THIS namespace. The same plaintext is
-                                           #   sealed again for argocd-infra, where Argo CD
-                                           #   resolves $argocd-infra-oidc:clientSecret (guardrail 32).
+  # Format is `$secretName:secretKey` — NOT a bare secret name (v1.35.0 CRD).
+  secret: $argocd-infra-oidc-client-secret:clientSecret
   webUrl: https://argocd-infra-amt.lan
   redirectUris:
     - https://argocd-infra-amt.lan/auth/callback

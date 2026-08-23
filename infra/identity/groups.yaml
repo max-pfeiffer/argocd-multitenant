@@ -4,7 +4,7 @@
 # ADDING A TEAM touches this file: the <team>-devs group is created here, in infra/, and synced by
 # the argocd-infra instance — while the policy line that consumes it lives in install/argocd-cr.yaml
 # and the namespaces in platform/. One PR, three directories.
-apiVersion: v1.edp.epam.com/v1
+apiVersion: v1.edp.epam.com/v1        # KeycloakClient/KeycloakRealmGroup are v1 (cluster kinds are v1alpha1)
 kind: KeycloakRealmGroup
 metadata:
   name: platform-admins

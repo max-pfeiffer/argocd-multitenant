@@ -10,7 +10,10 @@ spec:
   source:
     repoURL: https://epam.github.io/edp-helm-charts/stable
     chart: keycloak-operator
-    targetRevision: 1.35.0
+    targetRevision: 1.35.0        # chart version == appVersion. infra/identity/ is written
+                                  # against THIS version's CRDs — ClusterKeycloak and
+                                  # ClusterKeycloakRealm are v1alpha1, KeycloakClient and
+                                  # KeycloakRealmGroup are v1. Re-validate on any bump.
   destination:
     server: https://kubernetes.default.svc
     namespace: keycloak

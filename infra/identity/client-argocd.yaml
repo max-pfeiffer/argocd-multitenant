@@ -1,5 +1,5 @@
 # OIDC client for the MULTI-TENANT ArgoCD instance.
-apiVersion: v1.edp.epam.com/v1
+apiVersion: v1.edp.epam.com/v1        # KeycloakClient/KeycloakRealmGroup are v1 (cluster kinds are v1alpha1)
 kind: KeycloakClient
 metadata:
   name: argocd
@@ -12,9 +12,10 @@ spec:
     kind: ClusterKeycloakRealm
   clientId: argocd
   public: false
-  secret: argocd-oidc-client-secret        # SealedSecret in THIS namespace. The same plaintext is
-                                           #   sealed again for argocd-multitenant, where Argo CD
-                                           #   resolves $argocd-oidc:clientSecret (guardrail 32).
+  # Format is `$secretName:secretKey` — NOT a bare secret name (v1.35.0 CRD). Omit the field
+  # entirely and the operator generates a secret named keycloak-client-<metadata.name>-secret;
+  # we supply our own so the same value can be sealed for the Argo CD namespace too (guardrail 32).
+  secret: $argocd-oidc-client-secret:clientSecret
   webUrl: https://argocd-amt.lan
   redirectUris:
     - https://argocd-amt.lan/auth/callback
