@@ -1,0 +1,28 @@
+# The issuer every certificate in this cluster resolves back to: both control-plane gateways,
+# the Keycloak gateway, and the per-team tenant listeners.
+#
+# Cluster-scoped on purpose — certificates are requested from four different namespaces
+# (argocd-multitenant, argocd-infra, keycloak, tenant-gateway) and a namespaced StepIssuer would
+# need duplicating into each.
+#
+# THREE VALUES COME FROM THE CA BOOTSTRAP, not from thin air. All three are recorded in
+# infra/pki/step-ca-secrets.md when the CA is created:
+#   caBundle  - base64 of root_ca.crt (public; safe to commit)
+#   kid       - the JWK provisioner's key ID, `step ca provisioner list` (public; safe to commit)
+#   password  - the provisioner password, delivered as a SealedSecret (never committed plain)
+apiVersion: certmanager.step.sm/v1beta1
+kind: StepClusterIssuer
+metadata:
+  name: step-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+spec:
+  url: https://step-certificates.step-ca.svc.cluster.local
+  caBundle: <base64 of root_ca.crt, single line>
+  provisioner:
+    name: <jwk-provisioner-name>          # e.g. admin@amt.lan — from the CA bootstrap
+    kid: <jwk-provisioner-kid>
+    passwordRef:
+      name: step-certificates-provisioner-password
+      namespace: step-ca
+      key: password

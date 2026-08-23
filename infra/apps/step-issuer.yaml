@@ -1,0 +1,45 @@
+# cert-manager external issuer that signs CSRs directly against step-ca's JWK provisioner.
+#
+# WHY THIS INSTEAD OF ACME: with internal `.lan` hostnames on per-hostname LoadBalancer IPs,
+# HTTP-01 cannot work — step-ca would fetch http://<hostname>/.well-known/acme-challenge/... and
+# that resolves to the service's own gateway, not to any shared solver. HTTP-01 also cannot issue
+# the wildcard certificates the tenant listeners need. step-issuer performs no challenge at all:
+# cert-manager hands it a CertificateRequest and it asks the CA to sign. No DNS dependency, no
+# port-80 reachability, wildcards fine.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: step-issuer
+  namespace: argocd-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  project: infra
+  source:
+    repoURL: https://smallstep.github.io/helm-charts/
+    chart: step-issuer
+    targetRevision: 1.11.0
+    helm:
+      values: |
+        # The StepClusterIssuer itself is NOT created by the chart — it lives in
+        # infra/pki/step-clusterissuer.yaml so the CA wiring is reviewable next to the rest of
+        # the PKI material rather than buried in a values block.
+        stepIssuer:
+          create: false
+        stepClusterIssuer:
+          create: false
+        # Must match the cert-manager install (wave 2) — this is the SA step-issuer allows to
+        # approve CertificateRequests.
+        certManager:
+          serviceAccount:
+            name: cert-manager
+            namespace: cert-manager
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: step-ca              # same namespace as step-certificates
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
