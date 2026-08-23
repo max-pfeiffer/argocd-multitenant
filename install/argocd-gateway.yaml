@@ -5,9 +5,15 @@ kind: Gateway
 metadata:
   name: argocd
   namespace: argocd-multitenant
-  annotations:
-    io.cilium/lb-ipam-ips: "192.168.20.246"    # pinned; see the address allocation table in CLAUDE.md
 spec:
+  # Pinned with Gateway API's own `addresses` field, NOT an annotation. Cilium propagates no
+  # annotations from a Gateway onto the LoadBalancer Service it generates, so
+  # `io.cilium/lb-ipam-ips` here is silently inert and LB-IPAM hands out whatever is free — which
+  # shuffles addresses under the DNS records on any re-create. Verify with:
+  #   kubectl get gateway -A -o custom-columns=NAME:.metadata.name,ADDR:.status.addresses[*].value
+  addresses:
+    - type: IPAddress
+      value: "192.168.20.246"
   gatewayClassName: cilium
   listeners:
     - name: argocd-tls

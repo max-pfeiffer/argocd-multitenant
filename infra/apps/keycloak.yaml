@@ -51,8 +51,15 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "8"
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
-    io.cilium/lb-ipam-ips: "192.168.20.248"
 spec:
+  # Pinned with Gateway API's own `addresses` field, NOT an annotation. Cilium propagates no
+  # annotations from a Gateway onto the LoadBalancer Service it generates, so
+  # `io.cilium/lb-ipam-ips` here is silently inert and LB-IPAM hands out whatever is free — which
+  # shuffles addresses under the DNS records on any re-create. Verify with:
+  #   kubectl get gateway -A -o custom-columns=NAME:.metadata.name,ADDR:.status.addresses[*].value
+  addresses:
+    - type: IPAddress
+      value: "192.168.20.248"
   gatewayClassName: cilium
   listeners:
     - name: keycloak-tls
