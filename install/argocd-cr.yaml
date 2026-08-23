@@ -1,0 +1,70 @@
+# The multi-tenant ArgoCD instance. Applied by hand as a platform admin (guardrail 19) —
+# deliberately outside the path platform-root syncs.
+#
+# BOOTSTRAP NOTE: on a brand-new cluster, apply this first with spec.sourceNamespaces EMPTY.
+# The operator errors reconciling a sourceNamespaces entry for a namespace that does not exist
+# yet. Create the team namespaces, then re-apply with the list below. See Phase 9 of the runbook.
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd
+  namespace: argocd-multitenant
+spec:
+  version: v<pin-this-argocd-version>       # pin the Argo CD version explicitly, never float
+  resourceTrackingMethod: annotation        # required: multi-namespace app IDs are <namespace>/<name>
+                                            #   and blow past the 63-char label-value limit
+  disableAdmin: false                       # false only until OIDC is verified, then flip to true
+
+  # Applications-in-any-namespace: exact team "-apps" namespaces only.
+  # Never "*", never a glob ("team-*") or regex ("/^team-.*$/") — the operator expands both.
+  sourceNamespaces:
+    - team-a-apps
+    - team-b-apps
+    - team-c-apps
+
+  oidcConfig: |
+    name: Corp SSO
+    issuer: https://keycloak.example.com/realms/platform
+    clientID: argocd
+    clientSecret: $argocd-oidc:clientSecret
+    requestedScopes: ["openid", "profile", "email", "groups"]
+
+  rbac:
+    defaultPolicy: ""                       # default-deny — never widen this
+    scopes: "[groups]"
+    policy: |
+      p, role:platform-admin, applications, *, */*, allow
+      p, role:platform-admin, projects, *, *, allow
+      p, role:platform-admin, repositories, *, *, allow
+      p, role:platform-admin, clusters, *, *, allow
+      g, platform-admins, role:platform-admin
+
+      p, role:team-a, applications, get, team-a/team-a-apps/*, allow
+      p, role:team-a, applications, sync, team-a/team-a-apps/*, allow
+      p, role:team-a, applications, action/*, team-a/team-a-apps/*, allow
+      g, team-a-devs, role:team-a
+
+      p, role:team-b, applications, get, team-b/team-b-apps/*, allow
+      p, role:team-b, applications, sync, team-b/team-b-apps/*, allow
+      p, role:team-b, applications, action/*, team-b/team-b-apps/*, allow
+      g, team-b-devs, role:team-b
+
+      p, role:team-c, applications, get, team-c/team-c-apps/*, allow
+      p, role:team-c, applications, sync, team-c/team-c-apps/*, allow
+      p, role:team-c, applications, action/*, team-c/team-c-apps/*, allow
+      g, team-c-devs, role:team-c
+
+  server:
+    insecure: false                         # TLS terminates properly, no plaintext server mode
+    replicas: 1
+    host: argocd.example.com                # still set: the operator derives argocd-cm's `url` from it
+    ingress:
+      enabled: false                        # exposure is via Gateway API — see install/argocd-gateway.yaml
+    # No `route:` block — that field is OpenShift-only (guardrail 22).
+
+  controller:
+    replicas: 1                             # raise once HA is needed
+  repo:
+    replicas: 1
+  ha:
+    enabled: false                          # flip on once you outgrow a single redis replica

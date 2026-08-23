@@ -1,0 +1,27 @@
+# EDP Keycloak operator CRs. VERIFY the apiVersion and field names against the operator version
+# pinned in infra/apps/edp-keycloak-operator.yaml — this group has changed between releases.
+#
+# Everything about Keycloak's configuration is authored here, never in the admin console
+# (guardrail 33): a console edit is drift the operator may or may not revert, and it is invisible
+# in review.
+apiVersion: v1.edp.epam.com/v1
+kind: ClusterKeycloak
+metadata:
+  name: platform-keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  url: https://keycloak.example.com
+  secret: keycloak-admin-credentials      # SealedSecret in the operator's namespace
+---
+apiVersion: v1.edp.epam.com/v1
+kind: ClusterKeycloakRealm
+metadata:
+  name: platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  clusterKeycloakRef: platform-keycloak
+  realmName: platform
+  # The issuer both ArgoCD instances point at is:
+  #   https://keycloak.example.com/realms/platform

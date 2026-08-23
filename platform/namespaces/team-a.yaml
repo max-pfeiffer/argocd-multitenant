@@ -1,0 +1,71 @@
+# Workload namespace: where the team's Applications actually deploy.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a
+  labels:
+    argocd.argoproj.io/managed-by: argocd-multitenant   # lets ArgoCD deploy here
+    # Pinned explicitly rather than inherited from Talos' cluster default, so the level is reviewable
+    # in Git. Raise to `restricted` per team once their workloads are known to comply.
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-a-quota
+  namespace: team-a
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    pods: "50"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: team-a
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+# Control namespace: holds ONLY the team's Application CRs.
+# Deliberately carries NO argocd.argoproj.io/managed-by label — the operator adds
+# argocd.argoproj.io/managed-by-cluster-argocd here from spec.sourceNamespaces, and the two
+# labels are mutually exclusive.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-a-apps
+  labels:
+    # Nothing ever runs here (the quota below is pods: "0"), so this one can be `restricted` from day one.
+    # PSA labels are unrelated to the argocd.argoproj.io/* label exclusivity described above — they are safe here.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# Belt and braces: the AppProject permits team-a-apps as a destination (the root app writes
+# Application objects into it), so make sure nothing can be *run* there.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: team-a-apps-no-workloads
+  namespace: team-a-apps
+spec:
+  hard:
+    pods: "0"
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: team-a-apps
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]

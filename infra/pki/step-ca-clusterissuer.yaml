@@ -1,0 +1,23 @@
+# The issuer every certificate in this cluster resolves back to: both control-plane gateways
+# and the per-team tenant listeners. Requires the ACME provisioner to be enabled in step-ca's
+# configuration.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: step-ca-acme
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  acme:
+    server: https://step-certificates.step-ca.svc.cluster.local/acme/acme/directory
+    email: platform@example.com
+    privateKeySecretRef:
+      name: step-ca-acme-account-key
+    caBundle: <base64 of the step-ca root certificate>   # step-ca is not publicly trusted
+    solvers:
+      - http01:
+          gatewayHTTPRoute:                              # Gateway API solver, not ingress
+            parentRefs:
+              - name: acme-solver          # infra-owned; see infra/network/acme-solver-gateway.yaml
+                namespace: cert-manager
+                kind: Gateway

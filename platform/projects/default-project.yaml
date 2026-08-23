@@ -1,0 +1,13 @@
+# Argo CD auto-creates a `default` project with sourceRepos: ["*"] and destinations: [{*,*}].
+# Left as-is it is the easiest escalation path. Locked to empty (guardrail 7).
+# NOTE: each ArgoCD instance has its OWN default project — see infra/projects/default-project.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd-multitenant
+spec:
+  description: Locked down — not for use. Do not reference from any Application.
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []

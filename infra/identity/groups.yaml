@@ -1,0 +1,59 @@
+# The groups both instances' spec.rbac.policy blocks reference. A policy line naming a group that
+# does not exist here produces a user who authenticates fine and has no permissions.
+#
+# ADDING A TEAM touches this file: the <team>-devs group is created here, in infra/, and synced by
+# the argocd-infra instance — while the policy line that consumes it lives in install/argocd-cr.yaml
+# and the namespaces in platform/. One PR, three directories.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: platform-admins
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  realmRef:
+    name: platform
+    kind: ClusterKeycloakRealm
+  name: platform-admins
+---
+# Team groups drive RBAC on the MULTI-TENANT instance only. The infrastructure instance has no
+# team groups and never will (guardrail 29).
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: team-a-devs
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  realmRef:
+    name: platform
+    kind: ClusterKeycloakRealm
+  name: team-a-devs
+---
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: team-b-devs
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  realmRef:
+    name: platform
+    kind: ClusterKeycloakRealm
+  name: team-b-devs
+---
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakRealmGroup
+metadata:
+  name: team-c-devs
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  realmRef:
+    name: platform
+    kind: ClusterKeycloakRealm
+  name: team-c-devs

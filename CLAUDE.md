@@ -158,9 +158,11 @@ Full rationale and background for these choices is in `docs/argocd-multi-team-se
 │   ├── projects/
 │   │   ├── default-project.yaml    # the argocd-infra instance's own locked-down "default"
 │   │   └── infra-project.yaml      # AppProject with clusterResourceWhitelist — the one place that exists
+│   ├── namespaces.yaml             # every infra namespace, with PSA labels + managed-by
 │   ├── network/
 │   │   ├── cilium-lb-ippool.yaml   # CiliumLoadBalancerIPPool 192.168.20.245–249
-│   │   └── cilium-l2-policy.yaml   # CiliumL2AnnouncementPolicy
+│   │   ├── cilium-l2-policy.yaml   # CiliumL2AnnouncementPolicy
+│   │   └── acme-solver-gateway.yaml  # HTTP-01 challenge endpoint, infra-owned
 │   ├── storage/
 │   │   └── nfs-storageclass.yaml   # the default StorageClass, backed by the NFS CSI driver
 │   ├── pki/
@@ -706,7 +708,12 @@ spec:
 | 192.168.20.246 | `argocd` (multi-tenant control plane) gateway |
 | 192.168.20.247 | tenant gateway |
 | 192.168.20.248 | Keycloak |
-| 192.168.20.249 | spare |
+| 192.168.20.249 | ACME HTTP-01 solver gateway (`infra/network/acme-solver-gateway.yaml`) |
+
+**The pool is fully allocated — there is no spare.** The solver gateway is not optional and not
+shareable with the tenant gateway: pointing the `ClusterIssuer` at a gateway the *other* instance
+owns would make wave 4 unsatisfiable on a fresh cluster and would couple the two instances
+(guardrail 29). Widen the block before adding anything else that needs an address.
 
 step-ca stays `ClusterIP` — cert-manager reaches it in-cluster, and an internal CA has no reason to be on the LAN.
 Pin the assignments with `spec.addresses` / `loadBalancerIP` on the services rather than letting IPAM hand them out in
@@ -787,8 +794,8 @@ spec:
       - http01:
           gatewayHTTPRoute:                              # Gateway API solver, not ingress
             parentRefs:
-              - name: tenant
-                namespace: tenant-gateway
+              - name: acme-solver          # infra-owned; see infra/network/acme-solver-gateway.yaml
+                namespace: cert-manager
                 kind: Gateway
 ```
 

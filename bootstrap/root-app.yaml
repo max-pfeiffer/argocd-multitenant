@@ -1,0 +1,22 @@
+# Applied by hand, once, by a platform admin. From then on argocd-multitenant owns platform/.
+# Prerequisite: platform/projects/platform-project.yaml must be applied first (chicken-and-egg).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-root
+  namespace: argocd-multitenant
+spec:
+  project: platform                     # dedicated platform project, never "default"
+  source:
+    repoURL: https://git.example.com/platform/argocd-multitenant.git
+    targetRevision: main
+    path: platform
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd-multitenant
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

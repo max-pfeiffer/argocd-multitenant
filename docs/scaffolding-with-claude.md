@@ -110,8 +110,14 @@ Review before merging:
 # Structure matches the doc
 find bootstrap install platform -type f | sort
 
-# Guardrail 5 — no wildcard sourceRepos/destinations in a TEAM project
-grep -n '"\*"' platform/projects/team-*.yaml          # expect: no matches
+# Guardrail 5 — no wildcard sourceRepos/destinations in a TEAM project.
+# Grep is the wrong tool here: the blacklist legitimately contains `kind: "*"` for cilium.io,
+# so a naive search for '"*"' cries wolf. Check the two fields that matter, parsed:
+python3 -c 'import yaml,glob,sys
+for f in glob.glob("platform/projects/team-*.yaml"):
+    d=yaml.safe_load(open(f))["spec"]
+    bad=[r for r in d["sourceRepos"] if "*" in r]+[x for x in d["destinations"] if "*" in x["server"]+x["namespace"]]
+    print(f, "FAIL" if bad else "ok", bad or "")'
 # Guardrail 7 — the default project is empty
 grep -A4 'name: default' platform/projects/default-project.yaml
 # Guardrail 4 — every team Application disables namespace creation

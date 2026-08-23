@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Pinned to an immutable commit SHA, not a tag. Tags can be moved; `?ref=v0.x.y` would then
+  # resolve to different content on a later render with no diff in this file. (Guardrail 13)
+  - github.com/argoproj-labs/argocd-operator/config/default?ref=<pin-this-commit-sha>
+
+namespace: argocd-operator          # renames upstream's `*-system` namespace and scopes every resource
+
+images:
+  - name: quay.io/argoprojlabs/argocd-operator
+    digest: sha256:<pin-this-digest>    # digest, never a floating tag
+
+patches:
+  - path: namespace-patch.yaml
+  - path: manager-patch.yaml

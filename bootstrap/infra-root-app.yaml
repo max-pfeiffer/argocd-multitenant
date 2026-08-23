@@ -1,0 +1,22 @@
+# Applied by hand, once, by a platform admin. From then on argocd-infra owns infra/.
+# Prerequisite: infra/projects/infra-project.yaml must be applied first (chicken-and-egg).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infra-root
+  namespace: argocd-infra
+spec:
+  project: infra
+  source:
+    repoURL: https://git.example.com/platform/argocd-multitenant.git
+    targetRevision: main
+    path: infra
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd-infra
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

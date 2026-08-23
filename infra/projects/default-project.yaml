@@ -1,0 +1,12 @@
+# Each ArgoCD instance auto-creates its OWN `default` project. Locking the one in
+# argocd-multitenant does nothing for this instance (guardrail 7).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: default
+  namespace: argocd-infra
+spec:
+  description: Locked down — not for use. Do not reference from any Application.
+  sourceRepos: []
+  destinations: []
+  clusterResourceWhitelist: []

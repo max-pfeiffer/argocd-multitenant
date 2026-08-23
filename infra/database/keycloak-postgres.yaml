@@ -1,0 +1,27 @@
+# Keycloak's database. The official Keycloak operator does not provision one, and a Keycloak CR
+# without a database will not start.
+#
+# Realm configuration lives in Git (infra/identity/) and can be reconciled back, but user
+# sessions and any locally-created users cannot — configure backups accordingly rather than
+# treating this as disposable.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-db
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "7"
+spec:
+  instances: 3
+  storage:
+    size: 10Gi
+    storageClass: nfs-csi        # named explicitly, not inherited from the default marker
+  bootstrap:
+    initdb:
+      database: keycloak
+      owner: keycloak
+      secret:
+        name: keycloak-db-credentials    # a SealedSecret in this namespace — see step-ca-secrets.md
+                                         #   for the sealing procedure
+  monitoring:
+    enablePodMonitor: false

@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: step-certificates
+  namespace: argocd-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: infra
+  source:
+    repoURL: https://smallstep.github.io/helm-charts/
+    chart: step-certificates
+    targetRevision: 1.30.1
+    helm:
+      values: |
+        # CRITICAL (guardrail 30): never let the chart generate a CA. inject.enabled: false plus
+        # pre-existing secrets from infra/pki/step-ca-sealedsecrets.yaml. VERIFY these keys against
+        # chart 1.30.1's values.yaml — they have moved between versions.
+        inject:
+          enabled: false
+        existingSecrets:
+          enabled: true
+          ca: step-certificates-secrets
+          caPassword: step-certificates-ca-password
+          provisionerPassword: step-certificates-provisioner-password
+        ca:
+          # The ACME provisioner the step-ca-acme ClusterIssuer depends on.
+          provisioner:
+            acme:
+              enabled: true
+        persistence:
+          enabled: true
+          storageClass: nfs-csi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: step-ca
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false     # namespaces come from infra/namespaces.yaml, with PSA labels

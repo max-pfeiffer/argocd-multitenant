@@ -1,0 +1,15 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd-multitenant
+spec:
+  description: Platform-owned config from the argocd-multitenant repo
+  sourceRepos:
+    - https://git.example.com/platform/argocd-multitenant.git   # exact match, this repo only
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"                  # platform-owned: creates team namespaces and control-plane objects
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

@@ -1,0 +1,26 @@
+# The ONLY project in this repo with a non-empty clusterResourceWhitelist (guardrail 27).
+# It is safe only because the instance holding it has no tenants: no sourceNamespaces, no team
+# group in its RBAC, its own hostname. Changes here and to install/argocd-infra-cr.yaml are
+# one review, not two.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infra
+  namespace: argocd-infra
+spec:
+  description: Cluster infrastructure. Platform-only — no tenant ever has access to this project.
+  sourceRepos:
+    - https://git.example.com/platform/argocd-multitenant.git    # this repo, for infra/ manifests
+    - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+    - https://charts.jetstack.io
+    - https://smallstep.github.io/helm-charts/
+    - https://github.com/keycloak/keycloak-k8s-resources
+    - https://epam.github.io/edp-helm-charts/stable
+    - https://cloudnative-pg.github.io/charts
+    - https://github.com/bitnami/sealed-secrets
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"                 # the documented exception — installs CRDs, StorageClasses, ClusterIssuers

@@ -1,0 +1,24 @@
+# Platform-owned and platform-edited only (guardrail 14). Teams commit Application manifests
+# inside the path this watches; they never edit this object.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: team-a-root
+  namespace: team-a-apps     # the team's control namespace, not argocd-multitenant
+spec:
+  project: team-a                       # fixed — never templated from repo content
+  source:
+    repoURL: https://git.example.com/team-a/apps.git
+    targetRevision: main
+    path: app-of-apps                   # team commits raw Application manifests under this path
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: team-a-apps              # the Application objects land here
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false

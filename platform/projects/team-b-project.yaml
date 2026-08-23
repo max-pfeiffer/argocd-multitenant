@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: team-b
+  namespace: argocd-multitenant
+spec:
+  description: Team B applications
+  sourceRepos:
+    - https://git.example.com/team-b/apps.git   # exact match — never a wildcard or prefix pattern
+  destinations:
+    - server: https://kubernetes.default.svc     # exact match — never "*"
+      namespace: team-b                          # workloads
+    - server: https://kubernetes.default.svc
+      namespace: team-b-apps                     # the Application CRs the root app writes
+  sourceNamespaces:
+    - team-b-apps       # ONLY this team's own -apps namespace. Never argocd-multitenant, never another team's.
+  clusterResourceWhitelist: []          # no cluster-scoped resources, ever
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: cilium.io
+      kind: "*"                         # the whole Cilium CRD group — Cilium policy is additive
+    - group: gateway.networking.k8s.io
+      kind: Gateway                     # namespaced! clusterResourceWhitelist: [] does NOT cover it
+    - group: gateway.networking.k8s.io
+      kind: TLSRoute                    # L4 exposure — teams get HTTPRoute/GRPCRoute only
+    - group: gateway.networking.k8s.io
+      kind: TCPRoute
+    - group: gateway.networking.k8s.io
+      kind: UDPRoute
+    - group: gateway.networking.k8s.io
+      kind: ReferenceGrant              # cross-namespace backendRefs stay platform-reviewed
+    - group: argoproj.io
+      kind: AppProject                  # teams author Applications, never projects
+  permitOnlyProjectScopedClusters: true   # Applications can't target a cluster not registered to this project
+  orphanedResources:
+    warn: true

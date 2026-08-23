@@ -1,0 +1,35 @@
+# OIDC client for the INFRASTRUCTURE ArgoCD instance.
+apiVersion: v1.edp.epam.com/v1
+kind: KeycloakClient
+metadata:
+  name: argocd-infra
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  realmRef:
+    name: platform
+    kind: ClusterKeycloakRealm
+  clientId: argocd-infra
+  public: false
+  secret: argocd-infra-oidc-client-secret        # SealedSecret in THIS namespace. The same plaintext is
+                                           #   sealed again for argocd-infra, where Argo CD
+                                           #   resolves $argocd-infra-oidc:clientSecret (guardrail 32).
+  webUrl: https://argocd-infra.example.com
+  redirectUris:
+    - https://argocd-infra.example.com/auth/callback
+  directAccess: false
+  # THE ONE THAT WASTES AN AFTERNOON: Argo CD's scopes: "[groups]" needs a groups claim in the
+  # ID token, and Keycloak does not emit one by default. Without this mapper, login succeeds, the
+  # token carries no groups, every policy line fails to match, and defaultPolicy: "" denies
+  # everything — which reads exactly like broken RBAC.
+  protocolMappers:
+    - name: groups
+      protocol: openid-connect
+      protocolMapper: oidc-group-membership-mapper
+      config:
+        "claim.name": groups
+        "full.path": "false"
+        "id.token.claim": "true"
+        "access.token.claim": "true"
+        "userinfo.token.claim": "true"

@@ -1,0 +1,106 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tenant-gateway
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: tenant
+  namespace: tenant-gateway
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.20.247"   # pinned; see the address allocation table in CLAUDE.md
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: team-a
+      protocol: HTTPS
+      port: 443
+      hostname: "*.team-a.apps.example.com"    # team-a can only ever claim names under its own subdomain
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: team-a-apps-tls              # cert-manager, in THIS namespace — no ReferenceGrant needed
+      allowedRoutes:
+        namespaces:
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: team-a    # only team-a's workload namespace may attach
+        kinds:
+          - kind: HTTPRoute
+          - kind: GRPCRoute
+    - name: team-b
+      protocol: HTTPS
+      port: 443
+      hostname: "*.team-b.apps.example.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: team-b-apps-tls
+      allowedRoutes:
+        namespaces:
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: team-b
+        kinds:
+          - kind: HTTPRoute
+          - kind: GRPCRoute
+    - name: team-c
+      protocol: HTTPS
+      port: 443
+      hostname: "*.team-c.apps.example.com"
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - name: team-c-apps-tls
+      allowedRoutes:
+        namespaces:
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: team-c
+        kinds:
+          - kind: HTTPRoute
+          - kind: GRPCRoute
+---
+# Wildcard certificates for each team's subdomain, issued by the step-ca ACME ClusterIssuer
+# that argocd-infra installs. Platform-owned: they live in the gateway namespace, not the team's.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: team-a-apps-tls
+  namespace: tenant-gateway
+spec:
+  secretName: team-a-apps-tls
+  dnsNames: ["*.team-a.apps.example.com"]
+  issuerRef:
+    name: step-ca-acme
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: team-b-apps-tls
+  namespace: tenant-gateway
+spec:
+  secretName: team-b-apps-tls
+  dnsNames: ["*.team-b.apps.example.com"]
+  issuerRef:
+    name: step-ca-acme
+    kind: ClusterIssuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: team-c-apps-tls
+  namespace: tenant-gateway
+spec:
+  secretName: team-c-apps-tls
+  dnsNames: ["*.team-c.apps.example.com"]
+  issuerRef:
+    name: step-ca-acme
+    kind: ClusterIssuer

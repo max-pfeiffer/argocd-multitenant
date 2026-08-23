@@ -1,0 +1,16 @@
+# INERT unless the Cilium release itself was installed with l2announcements.enabled=true.
+# That is a value on the Cilium install, which lives outside this repo. Symptom when missing:
+# a Gateway that has an address but never answers ARP.
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  loadBalancerIPs: true
+  interfaces:
+    - ^eth[0-9]+
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux

@@ -1,0 +1,14 @@
+# Five addresses, allocated deliberately (see the table in CLAUDE.md):
+#   .245 argocd-infra gateway   .246 argocd gateway   .247 tenant gateway
+#   .248 Keycloak               .249 spare
+# apiVersion: v2 on Cilium >=1.16; check `kubectl api-resources | grep -i ippool` if unsure.
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: default-pool
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  blocks:
+    - start: "192.168.20.245"
+      stop: "192.168.20.249"

@@ -1,0 +1,82 @@
+# The Keycloak server itself. Not an Application — a Keycloak CR reconciled by the operator
+# installed at wave 6. Needs its database (wave 7) and a certificate (wave 4).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  secretName: keycloak-tls
+  dnsNames: ["keycloak.example.com"]
+  issuerRef:
+    name: step-ca-acme
+    kind: ClusterIssuer
+---
+apiVersion: k8s.keycloak.org/v2alpha1
+kind: Keycloak
+metadata:
+  name: platform-keycloak
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  instances: 1
+  hostname:
+    hostname: https://keycloak.example.com
+  http:
+    tlsSecret: keycloak-tls
+  ingress:
+    enabled: false            # exposure is via Gateway API, below
+  db:
+    vendor: postgres
+    host: keycloak-db-rw      # the CNPG Cluster's read-write service
+    database: keycloak
+    usernameSecret:
+      name: keycloak-db-app   # CNPG generates this secret for the `keycloak` owner
+      key: username
+    passwordSecret:
+      name: keycloak-db-app
+      key: password
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: keycloak
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+    io.cilium/lb-ipam-ips: "192.168.20.248"
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: keycloak-tls
+      protocol: TLS
+      port: 443
+      hostname: keycloak.example.com
+      tls:
+        mode: Passthrough      # Keycloak terminates with keycloak-tls, same shape as both ArgoCDs
+      allowedRoutes:
+        namespaces:
+          from: Same
+        kinds:
+          - kind: TLSRoute
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TLSRoute
+metadata:
+  name: keycloak
+  namespace: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  parentRefs:
+    - name: keycloak
+      sectionName: keycloak-tls
+  hostnames:
+    - keycloak.example.com
+  rules:
+    - backendRefs:
+        - name: platform-keycloak-service
+          port: 8443

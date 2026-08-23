@@ -1,0 +1,68 @@
+# Namespaces for every infrastructure component, created before anything lands in them
+# (sync-wave -3). Explicit PSA labels rather than CreateNamespace=true, because a namespace
+# the sync option creates carries no labels at all (guardrail 21). Start at baseline — Talos'
+# cluster default — and tighten per namespace once its workloads are known to comply.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sealed-secrets
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    argocd.argoproj.io/managed-by: argocd-infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cert-manager
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    argocd.argoproj.io/managed-by: argocd-infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: step-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    argocd.argoproj.io/managed-by: argocd-infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpg-system
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    argocd.argoproj.io/managed-by: argocd-infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+  labels:
+    argocd.argoproj.io/managed-by: argocd-infra
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

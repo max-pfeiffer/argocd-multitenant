@@ -1,0 +1,39 @@
+# The multi-tenant control plane's front door. Applied by hand, right after install/argocd-cr.yaml.
+# Deliberately a separate Gateway from the tenant one (guardrail 19).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: argocd
+  namespace: argocd-multitenant
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.20.246"    # pinned; see the address allocation table in CLAUDE.md
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: argocd-tls
+      protocol: TLS
+      port: 443
+      hostname: argocd.example.com
+      tls:
+        mode: Passthrough                 # argocd-server presents its own cert
+      allowedRoutes:
+        namespaces:
+          from: Same                      # nothing outside argocd-multitenant may attach
+        kinds:
+          - kind: TLSRoute
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2   # TLSRoute is experimental-channel only
+kind: TLSRoute
+metadata:
+  name: argocd-server
+  namespace: argocd-multitenant
+spec:
+  parentRefs:
+    - name: argocd
+      sectionName: argocd-tls
+  hostnames:
+    - argocd.example.com
+  rules:
+    - backendRefs:
+        - name: argocd-server
+          port: 443

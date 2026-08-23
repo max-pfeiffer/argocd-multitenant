@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: edp-keycloak-operator
+  namespace: argocd-infra
+  annotations:
+    argocd.argoproj.io/sync-wave: "6"
+spec:
+  project: infra
+  source:
+    repoURL: https://epam.github.io/edp-helm-charts/stable
+    chart: keycloak-operator
+    targetRevision: <pin-this-chart-version>
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false     # namespaces come from infra/namespaces.yaml, with PSA labels

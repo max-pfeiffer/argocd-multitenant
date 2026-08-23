@@ -1,0 +1,39 @@
+# The infrastructure control plane's front door. Applied by hand, after the LB pool exists.
+# Deliberately a separate Gateway from both the tenant and multi-tenant ones (guardrail 19).
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: argocd-infra
+  namespace: argocd-infra
+  annotations:
+    io.cilium/lb-ipam-ips: "192.168.20.245"    # pinned; see the address allocation table in CLAUDE.md
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: argocd-infra-tls
+      protocol: TLS
+      port: 443
+      hostname: argocd-infra.example.com
+      tls:
+        mode: Passthrough                 # argocd-server presents its own cert
+      allowedRoutes:
+        namespaces:
+          from: Same                      # nothing outside argocd-multitenant may attach
+        kinds:
+          - kind: TLSRoute
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2   # TLSRoute is experimental-channel only
+kind: TLSRoute
+metadata:
+  name: argocd-infra-server
+  namespace: argocd-infra
+spec:
+  parentRefs:
+    - name: argocd-infra
+      sectionName: argocd-infra-tls
+  hostnames:
+    - argocd-infra.example.com
+  rules:
+    - backendRefs:
+        - name: argocd-infra-server
+          port: 443

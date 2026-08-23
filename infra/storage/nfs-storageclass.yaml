@@ -1,0 +1,19 @@
+# The cluster's default StorageClass, backed by the NFS CSI driver installed at wave 0.
+# Manifests that need storage should still name this class explicitly rather than relying on
+# the default marker — which class is default is unreviewed cluster state.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <your-nfs-server>
+  share: <your-nfs-export-path>
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.1

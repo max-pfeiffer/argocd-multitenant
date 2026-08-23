@@ -1,0 +1,49 @@
+# The infrastructure ArgoCD instance. Applied by hand as a platform admin, BEFORE the
+# multi-tenant instance — it produces the StorageClass, LB addresses, certificate issuer
+# and identity provider the other instance depends on.
+#
+# BOOTSTRAP NOTE: apply this first WITHOUT spec.oidcConfig — Keycloak does not exist yet.
+# Reach the UI with: kubectl -n argocd-infra port-forward svc/argocd-infra-server 8080:443
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd-infra
+  namespace: argocd-infra
+spec:
+  version: v<pin-this-argocd-version>       # same version as the multi-tenant instance
+  resourceTrackingMethod: annotation
+  disableAdmin: false                       # true once Keycloak exists and OIDC is verified
+
+  sourceNamespaces: []                      # NONE. Applications live only in argocd-infra (guardrail 28)
+
+  oidcConfig: |                             # added after Keycloak is up — see the bootstrap order
+    name: Corp SSO
+    issuer: https://keycloak.example.com/realms/platform
+    clientID: argocd-infra
+    clientSecret: $argocd-infra-oidc:clientSecret
+    requestedScopes: ["openid", "profile", "email", "groups"]
+
+  rbac:
+    defaultPolicy: ""                       # default-deny, same as the other instance
+    scopes: "[groups]"
+    policy: |
+      p, role:infra-admin, applications, *, */*, allow
+      p, role:infra-admin, projects, *, *, allow
+      p, role:infra-admin, repositories, *, *, allow
+      p, role:infra-admin, clusters, *, *, allow
+      g, platform-admins, role:infra-admin
+      # No team group appears here. Ever. (guardrail 29)
+
+  server:
+    insecure: false
+    replicas: 1
+    host: argocd-infra.example.com
+    ingress:
+      enabled: false                        # Gateway API, same as the other instance
+
+  controller:
+    replicas: 1
+  repo:
+    replicas: 1
+  ha:
+    enabled: false
