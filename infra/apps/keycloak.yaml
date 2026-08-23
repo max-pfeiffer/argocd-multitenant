@@ -36,11 +36,16 @@ spec:
     vendor: postgres
     host: keycloak-db-rw      # the CNPG Cluster's read-write service
     database: keycloak
+    # NOT `keycloak-db-app`. CNPG only generates a `<cluster>-app` secret when it invents the
+    # credentials itself; because the Cluster supplies bootstrap.initdb.secret, the sealed
+    # secret in infra/database/keycloak-db-sealedsecret.yaml IS the application credential and
+    # no -app secret is ever created. Pointing at one yields
+    #   CreateContainerConfigError: secret "keycloak-db-app" not found
     usernameSecret:
-      name: keycloak-db-app   # CNPG generates this secret for the `keycloak` owner
+      name: keycloak-db-credentials
       key: username
     passwordSecret:
-      name: keycloak-db-app
+      name: keycloak-db-credentials
       key: password
 ---
 apiVersion: gateway.networking.k8s.io/v1

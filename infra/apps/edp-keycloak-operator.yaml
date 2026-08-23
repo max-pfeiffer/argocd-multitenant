@@ -30,6 +30,14 @@ spec:
         # out double-prefixed (edp-edp-keycloak-operator-role). Harmless, and preferable to two
         # operators fighting over one Deployment.
         name: edp-keycloak-operator
+        # REQUIRED for the ClusterKeycloak / ClusterKeycloakRealm CRs in infra/identity/.
+        # Left false (the chart default) the operator runs namespaced — WATCH_NAMESPACE is
+        # pinned to its own namespace by a fieldRef — and it simply never starts the
+        # cluster-scoped controllers. There is no error: the CRs are accepted by the API server,
+        # nothing reconciles them, and ClusterKeycloak just sits at `connected: false` forever.
+        # Enabling it sets WATCH_NAMESPACE="" and adds the ClusterRole/ClusterRoleBinding the
+        # cluster-scoped kinds need.
+        clusterReconciliationEnabled: true
   destination:
     server: https://kubernetes.default.svc
     namespace: keycloak

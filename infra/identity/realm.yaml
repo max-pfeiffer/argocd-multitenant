@@ -16,12 +16,33 @@ metadata:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   url: https://keycloak-amt.lan
+  # Keycloak's certificate is issued by our own step-ca, which no container's default trust
+  # store knows about. Without this the operator fails every reconcile with
+  #   x509: certificate signed by unknown authority
+  # and ClusterKeycloak sits at `connected: false` with no other symptom.
+  #
+  # cert-manager writes the issuing chain's root into `ca.crt` of the same secret it puts the
+  # serving certificate in, so this needs no separate copy of the CA and follows a CA rotation
+  # automatically. The secret must live in the operator's OPERATOR_NAMESPACE (`keycloak`).
+  #
+  # Deliberately NOT spec.insecureSkipVerify: this connection carries admin credentials.
+  caCert:
+    secretKeyRef:
+      name: keycloak-tls
+      key: ca.crt
   # `spec.secret` is DEPRECATED in v1.35.0 ("Use Auth instead. When Auth is set, this field is
   # ignored") — hence auth.passwordGrant. `spec.adminType` is likewise ignored when auth is set.
   auth:
     passwordGrant:
       username:
-        value: admin
+        # READ FROM THE SECRET, never hardcoded. The Keycloak 26.x operator bootstraps a
+        # *temporary* admin whose username it chooses — currently `temp-admin`, not `admin` —
+        # and writes both halves into platform-keycloak-initial-admin. Hardcoding `admin` here
+        # authenticates as a user that does not exist, and EDP reports it as an auth failure
+        # against the realm rather than as a bad username.
+        secretKeyRef:
+          name: platform-keycloak-initial-admin
+          key: username
       passwordRef:
         # The official Keycloak operator generates this secret for the `platform-keycloak`
         # Keycloak CR. VERIFY the namespace the operator resolves it in — a cluster-scoped CR has

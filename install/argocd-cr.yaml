@@ -37,6 +37,29 @@ spec:
     clientID: argocd
     clientSecret: $argocd-oidc:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
+    # Keycloak's certificate is issued by our own step-ca, which the argocd-server container's
+    # default trust store knows nothing about. Without this, SSO login fails at the very first
+    # step — argocd-server cannot fetch the issuer's discovery document — and the UI reports it
+    # as a generic login error rather than a certificate problem.
+    #
+    # This is the PUBLIC root certificate, so committing it is fine (guardrail 12 is about key
+    # material). It is the same cert as the caBundle in infra/pki/step-clusterissuer.yaml; if the
+    # CA is ever rotated, both change together.
+    #
+    # Deliberately NOT `oidc.tls.insecure.skip.verify` — this exchange carries the client secret.
+    rootCA: |
+      -----BEGIN CERTIFICATE-----
+      MIIBvzCCAWWgAwIBAgIQB5WVDHDi3ZoBzaRpuIbPWTAKBggqhkjOPQQDAjA+MRkw
+      FwYDVQQKExBQbGF0Zm9ybSBSb290IENBMSEwHwYDVQQDExhQbGF0Zm9ybSBSb290
+      IENBIFJvb3QgQ0EwHhcNMjYwODIzMTUyODU2WhcNMzYwODIwMTUyODU2WjA+MRkw
+      FwYDVQQKExBQbGF0Zm9ybSBSb290IENBMSEwHwYDVQQDExhQbGF0Zm9ybSBSb290
+      IENBIFJvb3QgQ0EwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATCM7fy6BzdGlLs
+      DO4iiP6D3Nku1aSOBr00BBF7Dd7YgvpyCkwuD1w2Z9cMnABgOFy4IPG2K925WSTK
+      dmjdBvkjo0UwQzAOBgNVHQ8BAf8EBAMCAQYwEgYDVR0TAQH/BAgwBgEB/wIBATAd
+      BgNVHQ4EFgQU8sb4cPdZnaw5YzK1//0el4PoHTIwCgYIKoZIzj0EAwIDSAAwRQIg
+      GLZWIBu9JDKS1IlDCAckL//miMr3/+9kDYaCptr5T4gCIQCjRn2+nlk7WQ7kcovD
+      JxUWJusFO4p8JNpAB7lJGQqdnQ==
+      -----END CERTIFICATE-----
 
   rbac:
     defaultPolicy: ""                       # default-deny — never widen this
