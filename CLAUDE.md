@@ -1,8 +1,15 @@
 # CLAUDE.md — ArgoCD Multi-Tenant Platform Repo
 
-This repo is the GitOps source of truth for a single ArgoCD instance that serves three teams (`team-a`, `team-b`, `team-c`)
-on one **vanilla Kubernetes cluster provisioned by Talos Linux** — not OpenShift, see "Cluster assumptions" below. It is
-managed by the platform team. Team application repos are separate and out of scope for this repo — this repo only contains
+This repo is the GitOps source of truth for **two ArgoCD instances** on one **vanilla Kubernetes cluster provisioned by
+Talos Linux** — not OpenShift, see "Cluster assumptions" below. Both are managed by the platform team:
+
+- **`argocd-multitenant`** serves three teams (`team-a`, `team-b`, `team-c`). Most of this file is about it.
+- **`argocd-infra`** installs cluster infrastructure: Sealed Secrets, Cilium LB config, NFS CSI, cert-manager, a step-ca
+  CA, CloudNativePG, and Keycloak. It has no
+  tenants, is never reachable by a team, and is installed **first** — the multi-tenant instance depends on what it
+  provides.
+
+The wall between them is the subject of its own section below, and of guardrails 27–30. Team application repos are separate and out of scope for this repo — this repo only contains
 the ArgoCD install (via the **argocd-operator**), the per-team boundaries (`AppProject`, root `Application`, namespace
 baseline), and RBAC/SSO config.
 
@@ -51,26 +58,73 @@ API or rely on an OpenShift default. Concretely:
 |---|---|---|
 | A `NetworkPolicy`-enforcing CNI | **present — Cilium v1.20.0** | installed in place of Talos' default Flannel (`cluster.network.cni.name: none` in the machine config); keep the kube-proxy vs. kube-proxy-replacement choice consistent cluster-wide |
 | Gateway API CRDs | **present — v1.6.1** | Cilium provides the `cilium` `GatewayClass`; no separate ingress controller is needed. **Check which channel is installed** — `TLSRoute` ships only in the experimental channel and the ArgoCD front door below wants it: `kubectl get crd tlsroutes.gateway.networking.k8s.io` |
-| A default `StorageClass` | **present** | nothing here consumes it yet; name the class explicitly in any manifest that does |
-| An address for `Gateway` LoadBalancer services | **verify** | on bare-metal Talos there is no cloud LB — the `Gateway`'s service stays `Pending` unless Cilium LB-IPAM (`CiliumLoadBalancerIPPool`) or BGP is configured. Platform-owned, cluster-level |
-| cert-manager, or externally provisioned certs | **to install** | issues the certificates the gateway listeners and `argocd-server` reference; guardrail 11 keeps `insecure: false`, so real certificates are not optional |
+| Cilium L2 announcements **enabled in the Cilium install** | **verify** | `CiliumL2AnnouncementPolicy` is inert unless Cilium itself was installed with `l2announcements.enabled=true`. That is a value on the Cilium release, which lives outside this repo — the `argocd-infra` Application can create the policy but cannot turn the feature on |
 
 Client-side tooling for the bootstrap steps: `kubectl` (with `kustomize` built in, or a standalone `kustomize` binary).
 No OLM, no `operator-sdk`, no Helm.
 
-These are cluster-level prerequisites owned by the platform team. They are **not** managed by this repo and not synced by
-ArgoCD: they all have to exist before ArgoCD does.
+These are genuinely external: Talos, Cilium and the Gateway API CRDs exist before any ArgoCD does. **Three things that
+used to be listed here are now produced by the `argocd-infra` instance instead**, which is why it is installed first:
+
+| Previously a prerequisite | Now provided by |
+|---|---|
+| A default `StorageClass` | `infra/apps/csi-driver-nfs` + `infra/storage/nfs-storageclass.yaml` |
+| An address for `Gateway` LoadBalancer services | `infra/network/cilium-lb-ippool.yaml` (`192.168.20.245–249`) |
+| cert-manager and a certificate issuer | `infra/apps/cert-manager` + `infra/apps/step-certificates` + the step-ca ACME `ClusterIssuer` |
 
 Both versions above are load-bearing enough to record and re-check on upgrade, but nothing in this file depends on a
 specific patch release: `kubectl -n kube-system exec ds/cilium -- cilium version` and
 `kubectl get crd gateways.gateway.networking.k8s.io -o jsonpath='{.metadata.annotations}'` are the ground truth.
 
+## Two ArgoCD instances, and the wall between them
+
+One argocd-operator, two `ArgoCD` custom resources. They share nothing else.
+
+| | `argocd-multitenant` | `argocd-infra` |
+|---|---|---|
+| Purpose | three tenant teams' workloads | cluster infrastructure |
+| CR | `install/argocd-cr.yaml` | `install/argocd-infra-cr.yaml` |
+| Root app | `bootstrap/root-app.yaml` → `platform/` | `bootstrap/infra-root-app.yaml` → `infra/` |
+| `spec.sourceNamespaces` | the three team `-apps` namespaces | **empty** — every `Application` lives in `argocd-infra` |
+| Cluster-scoped resources | forbidden to tenants (`clusterResourceWhitelist: []`) | permitted — that is its entire job |
+| Who can log in | `platform-admins` + the three team groups | `platform-admins` only |
+| Host | `argocd.example.com` | `argocd-infra.example.com` |
+| Installed | second | **first** |
+
+The isolation is not a matter of trust or naming. It rests on five mechanisms:
+
+1. **Separate namespaces, separate CRs.** `argocd-cm`, `argocd-rbac-cm` and `argocd-secret` are per-instance and
+   operator-managed. Neither instance can read or change the other's RBAC or SSO config.
+2. **`argocd.argoproj.io/managed-by` is exclusive** (guardrail 17). A namespace is deployed into by exactly one instance.
+   Infra namespaces carry `managed-by: argocd-infra`; team namespaces carry `managed-by: argocd-multitenant`. Neither
+   instance is ever granted the other's namespaces.
+3. **`argocd-infra` has no `sourceNamespaces` at all.** Applications-in-any-namespace is off for it, so no `Application`
+   outside `argocd-infra` is reconciled by it — including anything a team could write.
+4. **Disjoint Git paths.** `platform-root` syncs `platform/`; `infra-root` syncs `infra/`. Neither root app's path
+   contains the other's. Note this is convention plus review, not enforcement — `AppProject.sourceRepos` restricts
+   repositories, not paths. If you want it enforced, split `infra/` into its own repo and give the infra project only
+   that repo URL.
+5. **No shared identity.** No team group appears anywhere in the infra instance's `spec.rbac.policy`, and its
+   `defaultPolicy` is `""` like the other's.
+
+**What they do share is the operator.** One argocd-operator reconciles both CRs, so an operator upgrade moves both
+instances at once. That is the residual coupling, and it is the reason operator upgrades stay gated behind a reviewed
+render-and-apply (guardrail 13) rather than being automated.
+
+Both namespaces are listed in `ARGOCD_CLUSTER_CONFIG_NAMESPACES`, so **both** instances run with a cluster-wide
+`ClusterRole`. For `argocd-infra` that is the point. For `argocd-multitenant` it is what makes
+Applications-in-any-namespace work, and it is why the `AppProject` boundaries — not the controller's own permissions —
+are the tenant isolation. See guardrail 18: those two namespaces are the entire list, forever.
+
 ## Architecture summary
+
+The rest of this file describes the **multi-tenant** instance unless it says otherwise; the infrastructure instance has
+its own section further down.
 
 - ArgoCD is installed and managed by the [argocd-operator](https://argocd-operator.readthedocs.io/en/latest/) (argoproj-labs), **not** by the `argo-helm` chart. The operator itself is installed cluster-wide from pinned upstream manifests via Kustomize — **no OLM** — and the ArgoCD instance is declared as a single `ArgoCD` custom resource.
 - The `ArgoCD` CR is named `argocd` and lives in namespace **`argocd-multitenant`** (not the default `argocd`). That namespace is listed in the operator's `ARGOCD_CLUSTER_CONFIG_NAMESPACES` env var, which makes it a **cluster-scoped instance** — required for Applications-in-any-namespace, which the operator refuses to configure for a namespace-scoped instance.
 - **The operator owns `argocd-cm`, `argocd-rbac-cm`, `argocd-cmd-params-cm` and `argocd-secret`.** Hand-edits to those ConfigMaps are reverted on the next reconcile. Every setting that used to be a Helm value or a ConfigMap patch is now a field on the `ArgoCD` CR (`spec.rbac.policy`, `spec.oidcConfig`, `spec.sourceNamespaces`, `spec.disableAdmin`, …), with `spec.extraConfig` as the escape hatch for `argocd-cm` keys the CRD does not expose.
-- Auth is OIDC/SSO only, configured via `spec.oidcConfig` (no Dex, no Keycloak — `spec.sso` is left unset). Local admin is disabled via `spec.disableAdmin: true` after bootstrap. IdP groups `team-a-devs` / `team-b-devs` / `team-c-devs` map to per-team, project-scoped ArgoCD roles; `platform-admins` maps to `role:platform-admin`.
+- Auth is OIDC/SSO only, configured via `spec.oidcConfig`, pointed at the Keycloak that `argocd-infra` installs. **`spec.sso` stays unset** — that field makes the operator deploy and manage its own Keycloak or Dex, which is not what we want: our Keycloak is an infrastructure component with its own lifecycle, and Argo CD is just one of its OIDC clients. Local admin is disabled via `spec.disableAdmin: true` after bootstrap. IdP groups `team-a-devs` / `team-b-devs` / `team-c-devs` map to per-team, project-scoped ArgoCD roles; `platform-admins` maps to `role:platform-admin`.
 - Each team owns one external Git repo for their app manifests. This repo does **not** contain team application code — only pointers to team repo URLs.
 - **Self-service is Git-only, and teams author their own `Application` objects.** Each team gets a platform-created, platform-owned root `Application` ("app-of-apps") pointed at a directory in the team's repo (e.g. `app-of-apps/`). Everything the team commits there — literal `Application` manifests, including `project` and `destination` — becomes a live ArgoCD `Application`. Teams never touch the ArgoCD API/UI/CLI to create anything; they only ever `git push`.
 - Because teams control the full `Application` spec, containment lives in the `AppProject` + namespace topology, not in a fixed template. See Guardrails.
@@ -93,10 +147,42 @@ Full rationale and background for these choices is in `docs/argocd-multi-team-se
 │   │   ├── namespace-patch.yaml    # PSA labels on the argocd-operator namespace
 │   │   ├── manager-patch.yaml      # WATCH_NAMESPACE + ARGOCD_CLUSTER_CONFIG_NAMESPACES
 │   │   └── rendered.yaml           # committed `kustomize build` output — the artifact that is applied
-│   └── root-app.yaml               # app-of-apps: ArgoCD manages this repo's own /platform dir
+│   ├── root-app.yaml               # app-of-apps: argocd-multitenant manages this repo's /platform dir
+│   └── infra-root-app.yaml         # app-of-apps: argocd-infra manages this repo's /infra dir
 ├── install/
-│   ├── argocd-cr.yaml              # the ArgoCD custom resource — the whole instance config
-│   └── argocd-gateway.yaml         # Gateway + route for the ArgoCD UI itself — hand-applied (guardrail 19)
+│   ├── argocd-cr.yaml              # the multi-tenant ArgoCD CR — the whole instance config
+│   ├── argocd-gateway.yaml         # Gateway + route for the multi-tenant UI — hand-applied (guardrail 19)
+│   ├── argocd-infra-cr.yaml        # the infrastructure ArgoCD CR
+│   └── argocd-infra-gateway.yaml   # Gateway + route for the infrastructure UI — hand-applied
+├── infra/                          # synced by argocd-infra ONLY — never by platform-root
+│   ├── projects/
+│   │   ├── default-project.yaml    # the argocd-infra instance's own locked-down "default"
+│   │   └── infra-project.yaml      # AppProject with clusterResourceWhitelist — the one place that exists
+│   ├── network/
+│   │   ├── cilium-lb-ippool.yaml   # CiliumLoadBalancerIPPool 192.168.20.245–249
+│   │   └── cilium-l2-policy.yaml   # CiliumL2AnnouncementPolicy
+│   ├── storage/
+│   │   └── nfs-storageclass.yaml   # the default StorageClass, backed by the NFS CSI driver
+│   ├── pki/
+│   │   ├── step-ca-secrets.md      # how the CA key material is produced — NOT the material itself
+│   │   ├── step-ca-sealedsecrets.yaml  # the CA material, sealed
+│   │   └── step-ca-clusterissuer.yaml  # cert-manager ACME ClusterIssuer pointed at step-ca
+│   ├── database/
+│   │   └── keycloak-postgres.yaml  # CloudNativePG Cluster backing Keycloak
+│   ├── identity/                   # EDP Keycloak operator CRs — realm config as Git objects
+│   │   ├── realm.yaml
+│   │   ├── client-argocd.yaml      # OIDC client for argocd-multitenant
+│   │   ├── client-argocd-infra.yaml
+│   │   └── groups.yaml             # platform-admins + team-<x>-devs
+│   └── apps/                       # one Application per infrastructure component, sync-wave ordered
+│       ├── sealed-secrets.yaml
+│       ├── csi-driver-nfs.yaml
+│       ├── cert-manager.yaml
+│       ├── step-certificates.yaml
+│       ├── cloudnative-pg.yaml
+│       ├── keycloak-operator.yaml
+│       ├── edp-keycloak-operator.yaml
+│       └── keycloak.yaml
 └── platform/
     ├── gateway/
     │   └── tenant-gateway.yaml     # shared Gateway for team workloads, one listener per team
@@ -212,7 +298,7 @@ spec:
             - name: WATCH_NAMESPACE
               value: ""
             - name: ARGOCD_CLUSTER_CONFIG_NAMESPACES
-              value: argocd-multitenant        # ONLY this namespace — see guardrail 18
+              value: argocd-infra,argocd-multitenant   # exactly these two — see guardrail 18
 ```
 
 ### Render, review, apply
@@ -419,6 +505,296 @@ stringData:
 Confirm at least one `platform-admins` member can log in via SSO, then set `spec.disableAdmin: true` in
 `install/argocd-cr.yaml` and re-apply.
 
+## The infrastructure instance (`install/argocd-infra-cr.yaml`)
+
+This instance exists to install the things a cluster needs before it can host tenants. It is applied by hand, before the
+multi-tenant instance, into its own namespace:
+
+```bash
+kubectl create namespace argocd-infra --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace argocd-infra \
+  pod-security.kubernetes.io/enforce=baseline \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/audit=restricted \
+  pod-security.kubernetes.io/warn=restricted --overwrite
+kubectl apply -f install/argocd-infra-cr.yaml
+```
+
+```yaml
+apiVersion: argoproj.io/v1beta1
+kind: ArgoCD
+metadata:
+  name: argocd-infra
+  namespace: argocd-infra
+spec:
+  version: v<pin-this-argocd-version>       # same version as the multi-tenant instance
+  resourceTrackingMethod: annotation
+  disableAdmin: false                       # true once Keycloak exists and OIDC is verified
+
+  sourceNamespaces: []                      # NONE. Applications live only in argocd-infra (guardrail 28)
+
+  oidcConfig: |                             # added after Keycloak is up — see the ordering below
+    name: Corp SSO
+    issuer: https://keycloak.example.com/realms/platform
+    clientID: argocd-infra
+    clientSecret: $argocd-infra-oidc:clientSecret
+    requestedScopes: ["openid", "profile", "email", "groups"]
+
+  rbac:
+    defaultPolicy: ""                       # default-deny, same as the other instance
+    scopes: "[groups]"
+    policy: |
+      p, role:infra-admin, applications, *, */*, allow
+      p, role:infra-admin, projects, *, *, allow
+      p, role:infra-admin, repositories, *, *, allow
+      p, role:infra-admin, clusters, *, *, allow
+      g, platform-admins, role:infra-admin
+      # No team group appears here. Ever. (guardrail 29)
+
+  server:
+    insecure: false
+    host: argocd-infra.example.com
+    ingress:
+      enabled: false                        # Gateway API, same as the other instance
+
+  controller:
+    replicas: 1
+  repo:
+    replicas: 1
+  ha:
+    enabled: false
+```
+
+The operator's initial admin secret for this instance is `argocd-infra-cluster` (it is `<cr-name>-cluster`), not
+`argocd-cluster`.
+
+**Chicken and egg: this instance comes up before there is any way to reach it.** cert-manager, the CA, and the
+load-balancer address range are all things it is about to install. Until they exist, use a port-forward — do not
+work around it by setting `insecure: true` or exposing it some other way:
+
+```bash
+kubectl -n argocd-infra port-forward svc/argocd-infra-server 8080:443
+```
+
+### The `infra` AppProject
+
+`infra/projects/infra-project.yaml`. This is the **only** project anywhere in this repo with a non-empty
+`clusterResourceWhitelist`, and it is deliberately unrestricted — installing CRDs, `StorageClass`es and `ClusterIssuer`s
+is what this instance is for:
+
+```yaml
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infra
+  namespace: argocd-infra
+spec:
+  description: Cluster infrastructure. Platform-only — no tenant ever has access to this project.
+  sourceRepos:
+    - https://git.example.com/platform/argocd-multitenant.git    # this repo, for infra/ manifests
+    - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+    - https://charts.jetstack.io
+    - https://smallstep.github.io/helm-charts/
+    - https://github.com/keycloak/keycloak-k8s-resources
+    - https://epam.github.io/edp-helm-charts/stable
+    - https://cloudnative-pg.github.io/charts
+    - https://github.com/bitnami/sealed-secrets
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"                 # the documented exception — see below
+```
+
+Guardrail 3 says a team project never gets a cluster-scoped resource. That rule is not weakened here; this project is
+simply not a team project. What makes the exception safe is everything in "the wall between them": the project lives in
+an instance with no `sourceNamespaces`, no team group in its RBAC, and a separate hostname. **The moment any of those
+three change, this whitelist becomes a cluster-admin escalation path.** Treat edits to this file and edits to
+`install/argocd-infra-cr.yaml` as the same review.
+
+`infra/projects/default-project.yaml` locks this instance's own built-in `default` project to empty, exactly as
+`platform/projects/default-project.yaml` does for the other instance. Each ArgoCD instance auto-creates its own — locking
+one does nothing for the other (guardrail 7).
+
+### What it installs, and in what order
+
+Ordering is expressed with `argocd.argoproj.io/sync-wave` annotations on the `Application` objects, because these have
+real dependencies on each other:
+
+| Wave | Application | Source | Why this wave |
+|---|---|---|---|
+| -2 | `sealed-secrets` | `https://github.com/bitnami/sealed-secrets` | **first, always** — every later wave that needs a secret gets it as a `SealedSecret`, and nothing can be unsealed before the controller exists |
+| -1 | Cilium LB-IPAM pool + L2 announcement policy | `infra/network/` (this repo) | nothing with a `Gateway` gets an address until this exists |
+| 0 | `csi-driver-nfs` | `https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts` | provides the CSI driver the `StorageClass` names |
+| 1 | default `StorageClass` | `infra/storage/` (this repo) | step-ca's and Postgres' PVCs need a class |
+| 2 | `cert-manager` v1.21.1 | `https://charts.jetstack.io` | its CRDs must exist before any `ClusterIssuer` |
+| 3 | `step-certificates` v1.30.1 | `https://smallstep.github.io/helm-charts/` | the CA the ACME issuer points at; needs storage (wave 1) and its sealed CA secrets (wave −2) |
+| 4 | step-ca ACME `ClusterIssuer` | `infra/pki/` (this repo) | needs cert-manager CRDs *and* a running CA |
+| 5 | `cloudnative-pg` v0.27.1 | `https://cloudnative-pg.github.io/charts` | the Postgres operator Keycloak's database needs |
+| 6 | Keycloak operator + EDP Keycloak operator | `https://github.com/keycloak/keycloak-k8s-resources`, `https://epam.github.io/edp-helm-charts/stable` | independent of each other; both must precede any Keycloak object |
+| 7 | Postgres `Cluster` for Keycloak | `infra/database/` (this repo) | needs the CNPG operator (5) and storage (1) |
+| 8 | `Keycloak` instance | `infra/apps/keycloak.yaml` | needs its database (7), a certificate (4) and the operator (6) |
+| 9 | Realm, clients, groups | `infra/identity/` (this repo) | EDP CRs only reconcile against a running Keycloak |
+
+### Identity: who does what
+
+Three components, three distinct jobs, and mixing them up is the usual source of confusion:
+
+| Component | Owns |
+|---|---|
+| **CloudNativePG** | the Postgres `Cluster` that backs Keycloak. The official Keycloak operator does not provision a database, and a `Keycloak` CR without one will not start |
+| **Keycloak operator** (`keycloak.org`) | the Keycloak *server*: the `Keycloak` CR, its pods, its ingress/route wiring. Nothing about what is configured inside it |
+| **EDP Keycloak operator** (`epam/edp-keycloak-operator`) | everything *inside* Keycloak, as Git objects: the realm, the OIDC clients, the groups, the role mappings |
+
+The EDP operator is what closes the loop for this repo. Two distinct jobs it does here:
+
+**1. Admin access to both ArgoCD instances.** A `KeycloakClient` for `argocd` and one for `argocd-infra`, plus the
+`platform-admins` group that both instances' `spec.rbac.policy` maps to `role:platform-admin` / `role:infra-admin`.
+
+**2. Team RBAC for the multi-tenant instance.** A `KeycloakRealmGroup` per team — `team-a-devs`, `team-b-devs`,
+`team-c-devs` — matching the `g, <group>, role:<team>` lines in `install/argocd-cr.yaml`. The infrastructure instance has
+no team groups and never will (guardrail 29); these exist purely to drive the other instance's RBAC.
+
+**The one that will waste an afternoon:** Argo CD's `scopes: "[groups]"` needs a `groups` claim in the ID token, and
+Keycloak does not emit one by default. The realm needs a group-membership protocol mapper on each client (EDP models this
+on the `KeycloakClient`, or as a `KeycloakClientScope`). Without it, SSO login *succeeds*, the token carries no groups,
+every policy line fails to match, and `defaultPolicy: ""` denies everything — which reads like broken RBAC rather than a
+missing claim. Verify with `argocd account get-user-info` or by decoding the token before concluding the policy is wrong.
+
+Because realm configuration lives in Git, the Postgres cluster is less precious than it looks: realms, clients and groups
+can be reconciled back from `infra/identity/`. User sessions and any locally-created users cannot — configure CNPG
+backups accordingly rather than assuming the DB is disposable.
+
+Pin every chart with `targetRevision` on the `Application` — chart version for Helm sources, a release tag for Git ones
+(guardrail 13). The `master` in the csi-driver-nfs URL is only where the chart *index* is served from; the chart version
+you select with `targetRevision` is still immutable, so that URL is acceptable, but a Git source pointed at `master`
+would not be.
+
+### Cilium LB-IPAM and L2 announcements
+
+`infra/network/cilium-lb-ippool.yaml` — five addresses, which is exactly enough, so allocate them deliberately:
+
+```yaml
+apiVersion: cilium.io/v2                 # v2alpha1 on older Cilium — check `kubectl api-resources | grep -i ippool`
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: default-pool
+spec:
+  blocks:
+    - start: "192.168.20.245"
+      stop: "192.168.20.249"
+```
+
+```yaml
+apiVersion: cilium.io/v2alpha1
+kind: CiliumL2AnnouncementPolicy
+metadata:
+  name: default-l2
+spec:
+  loadBalancerIPs: true
+  interfaces:
+    - ^eth[0-9]+
+  nodeSelector:
+    matchLabels:
+      kubernetes.io/os: linux
+```
+
+| Address | Assigned to |
+|---|---|
+| 192.168.20.245 | `argocd-infra` gateway |
+| 192.168.20.246 | `argocd` (multi-tenant control plane) gateway |
+| 192.168.20.247 | tenant gateway |
+| 192.168.20.248 | Keycloak |
+| 192.168.20.249 | spare |
+
+step-ca stays `ClusterIP` — cert-manager reaches it in-cluster, and an internal CA has no reason to be on the LAN.
+Pin the assignments with `spec.addresses` / `loadBalancerIP` on the services rather than letting IPAM hand them out in
+whatever order things come up, or a re-creation will shuffle them under your DNS records.
+
+Remember `l2announcements.enabled=true` has to be set on the **Cilium install itself** — outside this repo. The policy
+object above is silently inert without it, and the symptom is a `Gateway` service that has an IP but never answers ARP.
+
+### Sealed Secrets: how both instances handle secrets
+
+One `sealed-secrets` controller, installed by `argocd-infra` at wave −2, serves the whole cluster. It watches
+`SealedSecret` objects in **any** namespace and produces the corresponding `Secret` alongside them. That makes it the
+mechanism guardrail 12 has always pointed at, now concrete, and it is shared by both ArgoCD instances and by the teams:
+
+| Who | Seals what | Lands in |
+|---|---|---|
+| `argocd-infra` | step-ca CA key material, Keycloak DB credentials, the `argocd-infra` OIDC client secret | `infra/` |
+| `argocd-multitenant` | the `argocd` OIDC client secret | `platform/` |
+| Teams | their own application secrets | their own repo, their own namespace |
+
+**Sealing is namespace- and name-scoped, and it must stay that way** (guardrail 32). A `SealedSecret` sealed for
+`team-a/db-password` cannot be unsealed anywhere else — moving the manifest to another namespace or renaming it makes it
+undecryptable. For a multi-tenant cluster that is not a limitation, it is the point: a team can commit sealed material to
+their own repo, and no other team can lift it, because the controller will refuse to unseal it under a different name or
+namespace. The team `AppProject`'s `destinations` allowlist is the second lock — it stops a team-authored `SealedSecret`
+from being *placed* in someone else's namespace in the first place.
+
+The practical consequence when one secret is needed in two places — the OIDC client secret, which both the EDP
+`KeycloakClient` and Argo CD's `$argocd-oidc:clientSecret` reference — is that you seal the same plaintext **twice**, once
+per namespace, and commit both. Do not reach for `--scope cluster-wide` to avoid the duplication; that produces a secret
+any namespace can unseal, which is exactly the property strict scoping exists to deny.
+
+**The sealing key is the one piece of material that is not in Git and cannot be regenerated** (guardrail 31). Lose the
+controller's private key and every `SealedSecret` in this repo, in `infra/`, and in all three team repos becomes
+undecryptable at once — the recovery is regenerating every secret from scratch. Back it up out of band, before you seal
+anything:
+
+```bash
+kubectl -n sealed-secrets get secret \
+  -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > <your secret manager, not this repo>
+```
+
+### The CA: bootstrap step-ca from existing secrets
+
+The one part of `infra/` where the GitOps default is actively dangerous. The `step-certificates` chart will happily
+generate a fresh root CA if it does not find one — which means a re-sync, a re-install, or a namespace recreation
+silently rotates your cluster's root of trust and invalidates every certificate issued from it.
+
+So: **the CA key material is created once, out of band, and delivered as pre-existing secrets.** The chart is configured
+not to generate anything (`inject.enabled: false` in the values, plus `existingSecrets`; verify the exact keys against
+the values file for chart 1.30.1 — they have moved between versions).
+
+Those secrets are `SealedSecret` objects committed under `infra/pki/`, which is why sealed-secrets is wave −2 and step-ca
+is wave 3: the controller has to exist before the CA material can be unsealed. Generate the root and intermediate once
+with `step certificate create`, seal each with `kubeseal` for the `step-ca` namespace, commit the sealed form, and destroy
+the plaintext. `infra/pki/step-ca-secrets.md` documents which secrets must exist and how they were produced — the
+procedure, never the material.
+
+This is the payoff of putting sealed-secrets first: the CA bootstrap is a normal reviewed commit rather than a manual
+`kubectl create secret` someone has to remember to run at exactly the right moment, and re-creating the cluster replays
+it from Git.
+
+Then the ACME issuer, `infra/pki/step-ca-clusterissuer.yaml`:
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: step-ca-acme
+spec:
+  acme:
+    server: https://step-certificates.step-ca.svc.cluster.local/acme/acme/directory
+    email: platform@example.com
+    privateKeySecretRef:
+      name: step-ca-acme-account-key
+    caBundle: <base64 of the step-ca root certificate>   # step-ca is not publicly trusted
+    solvers:
+      - http01:
+          gatewayHTTPRoute:                              # Gateway API solver, not ingress
+            parentRefs:
+              - name: tenant
+                namespace: tenant-gateway
+                kind: Gateway
+```
+
+This requires the ACME provisioner to be enabled in step-ca's configuration. Every `certificateRefs` in this repo —
+both instances' gateways and the tenant listeners — resolves back to this issuer.
+
 ## Exposing ArgoCD and team workloads (Gateway API)
 
 Cilium implements Gateway API, so nothing here uses `Ingress`. There are **two** gateways on purpose, and the split is the
@@ -427,8 +803,13 @@ tenant front door is GitOps-managed.
 
 | Gateway | Lives in | Managed by | Serves |
 |---|---|---|---|
-| `argocd` | `install/argocd-gateway.yaml`, namespace `argocd-multitenant` | platform admin, `kubectl apply` | the ArgoCD UI/API only |
+| `argocd` | `install/argocd-gateway.yaml`, namespace `argocd-multitenant` | platform admin, `kubectl apply` | the multi-tenant ArgoCD UI/API only |
+| `argocd-infra` | `install/argocd-infra-gateway.yaml`, namespace `argocd-infra` | platform admin, `kubectl apply` | the infrastructure ArgoCD UI/API only |
 | `tenant` | `platform/gateway/tenant-gateway.yaml`, namespace `tenant-gateway` | `platform-root` | team workloads, one listener per team |
+
+Three gateways, three addresses out of the five in the pool. Both control-plane gateways follow the same shape and the
+same reasoning; `install/argocd-infra-gateway.yaml` is `install/argocd-gateway.yaml` with the name, namespace, hostname
+and backend service substituted.
 
 They are separate objects, not two listeners on one gateway, so that a bad edit to a team listener cannot take down the
 UI you would use to fix it — the same reasoning as guardrail 19. It costs one extra load-balancer address.
@@ -909,8 +1290,32 @@ spec:
       selfHeal: true
 ```
 
-Chicken-and-egg note: `platform-root` references the `platform` AppProject that lives inside the directory it syncs. Apply
-`platform/projects/platform-project.yaml` by hand once, immediately before the root app; from then on ArgoCD owns it.
+`bootstrap/infra-root-app.yaml` is the same object for the other instance: `metadata.namespace: argocd-infra`,
+`project: infra`, `path: infra`, `destination.namespace: argocd-infra`. Apply it by hand once, in the same way.
+
+Chicken-and-egg note: each root app references an AppProject that lives inside the directory it syncs. Apply
+`platform/projects/platform-project.yaml` (respectively `infra/projects/infra-project.yaml`) by hand once, immediately
+before its root app; from then on ArgoCD owns it.
+
+### Order of the whole bootstrap
+
+The infrastructure instance produces things the multi-tenant instance needs — a storage class, an LB address, a
+certificate issuer, an identity provider — so it goes first, and it comes up without any of them:
+
+1. Talos, Cilium (with `l2announcements.enabled=true`), Gateway API CRDs. Outside this repo.
+2. `bootstrap/operator/` — one operator, both namespaces in `ARGOCD_CLUSTER_CONFIG_NAMESPACES`.
+3. `argocd-infra` namespace + `install/argocd-infra-cr.yaml`. Reach it by `kubectl port-forward`; there is no LB address
+   or certificate yet.
+4. `infra/projects/infra-project.yaml`, then `bootstrap/infra-root-app.yaml`. Sync waves −1→7 bring up LB-IPAM, NFS CSI,
+   the default `StorageClass`, cert-manager, step-ca, the ACME `ClusterIssuer`, then Keycloak.
+5. `install/argocd-infra-gateway.yaml` — now there is an address and a certificate, so the port-forward can stop.
+6. Keycloak realm and OIDC clients (`argocd`, `argocd-infra`) via the EDP operator, from `infra/`.
+7. `argocd-multitenant` namespace + `install/argocd-cr.yaml` + `install/argocd-gateway.yaml`.
+8. Team namespaces → `spec.sourceNamespaces` → `platform/projects/platform-project.yaml` → `bootstrap/root-app.yaml`,
+   in that order (see "Common tasks").
+9. Verify SSO on both instances, then `spec.disableAdmin: true` on both CRs.
+
+Steps 3–6 are the part that does not appear anywhere else in this file, because they only happen once.
 
 `bootstrap/operator/` and `install/` stay outside the synced path on purpose. The operator manifests and the `ArgoCD` CR
 are the control plane's own definition — including its RBAC policy and SSO config — and are applied by a platform admin
@@ -931,7 +1336,10 @@ labels),
 `platform/projects/<team>-project.yaml` (exact-match `sourceRepos`/`destinations`, `sourceNamespaces: [<team>-apps]`,
 `permitOnlyProjectScopedClusters: true`), and `platform/root-apps/<team>-root-app.yaml`. Then, in `install/argocd-cr.yaml`,
 add `<team>-apps` to `spec.sourceNamespaces` and a new `role:<team>` block to `spec.rbac.policy` using the
-`<team>/<team>-apps/*` pattern. If the team needs inbound traffic, the same PR adds their listener to
+`<team>/<team>-apps/*` pattern. **Also add a `KeycloakRealmGroup` for `<team>-devs` under `infra/identity/`** — the group
+named in `spec.rbac.policy` has to exist in Keycloak, and it is created there declaratively, not in the console. That
+part of the change is synced by the *other* ArgoCD instance, so a team onboarding PR now spans `platform/`, `install/`
+and `infra/`. If the team needs inbound traffic, the same PR adds their listener to
 `platform/gateway/tenant-gateway.yaml` (hostname under their own subdomain, `allowedRoutes` selector pinned to their
 workload namespace) plus the certificate and `NetworkPolicy` exception that go with it.
 
@@ -958,6 +1366,26 @@ compatibility matrix before either.
 tenant gateway (`platform/gateway/tenant-gateway.yaml`), a cert-manager `Certificate` for that team's wildcard hostname in
 the `tenant-gateway` namespace, a DNS record, and the `NetworkPolicy` exception allowing gateway→pod ingress. All four are
 platform-owned and belong in the same reviewed PR that onboards the team.
+
+**Rotate a secret:** re-seal it with `kubeseal`, commit, let ArgoCD sync. The unsealed `Secret` is owned by the
+controller, so do not `kubectl edit` it — the change survives until the next reconcile and then vanishes, which is a
+confusing hour. If the secret exists in two namespaces (the OIDC client secret does), re-seal both.
+
+**Add an infrastructure component:** a new `Application` under `infra/apps/`, in the `infra` project, with a
+`targetRevision` pinned to a chart version or release tag and an `argocd.argoproj.io/sync-wave` that reflects its real
+dependencies. If it needs a load-balancer address, take one from the pool table and check the pool is not exhausted
+first. It goes in the `argocd-infra` namespace like every other Application on that instance — never in a team namespace,
+never in `argocd-multitenant`.
+
+**Verify the two instances are not overlapping:**
+
+```bash
+# No namespace is claimed by both instances
+kubectl get ns -L argocd.argoproj.io/managed-by
+# The infra instance reconciles nothing outside its own namespace
+kubectl -n argocd-infra get applications
+kubectl get applications -A --field-selector metadata.namespace!=argocd-infra   -o custom-columns=NS:.metadata.namespace,NAME:.metadata.name   # expect: only team -apps + argocd-multitenant
+```
 
 **Verify `NetworkPolicy` is actually enforced** (once per cluster, and again after any CNI change or cluster rebuild — a
 cluster that comes back up on Talos' default Flannel silently loses enforcement while every manifest still looks right):
@@ -1002,18 +1430,18 @@ workload fit without recording why.
 4. Every team `Application` keeps `syncOptions: [CreateNamespace=false]`. Namespace lifecycle stays platform-owned.
 5. Every team `AppProject`'s `sourceRepos` and `destinations` are exact-match values — never `"*"`, never a prefix/glob pattern. This is the actual boundary that contains a team-authored `Application`, regardless of what `project`/`destination` the team writes into it. (The `platform` project's `namespace: "*"` destination is the sole, platform-owned exception.)
 6. Every team `AppProject`'s `sourceNamespaces` contains **only that team's own `-apps` namespace** — never `argocd-multitenant`, never a workload namespace, never another team's. Getting this wrong is the specific, documented way to reopen cross-tenant access under Applications-in-any-namespace.
-7. The built-in `default` AppProject stays locked to empty `sourceRepos`/`destinations`/`clusterResourceWhitelist`. Platform-owned apps use the dedicated `platform` project, not an exception to this rule.
+7. The built-in `default` AppProject stays locked to empty `sourceRepos`/`destinations`/`clusterResourceWhitelist` — **in both instances**. Each ArgoCD instance auto-creates its own `default`; locking one does nothing for the other. Platform-owned apps use the dedicated `platform` or `infra` project, not an exception to this rule.
 8. `permitOnlyProjectScopedClusters: true` on every team `AppProject`.
 9. Team repo credentials (`Repository`/`argocd-repo-creds` secrets) are always scoped to their owning `AppProject` via the `project` field — never registered project-wide.
 10. `spec.disableAdmin` stays `true` once OIDC is verified. Only flip it back for break-glass recovery, and flip it off again afterward.
 11. `spec.server.insecure` stays `false`; ArgoCD is always reached over TLS. This holds however it is exposed — if a routing setup is awkward to terminate correctly, fix the routing, never drop the server to plaintext.
-12. Application-level secrets never get committed in plaintext anywhere in a team repo or this repo — they arrive via Sealed Secrets, SOPS, or an external secret manager. The OIDC client secret lives in its own labelled `Secret`, never in `argocd-secret` and never in Git.
+12. Secrets are committed only in sealed form, anywhere in this repo or a team repo. Sealed Secrets is the mechanism — a `SealedSecret` in Git, never a plaintext `Secret`, and never a value pasted into a values block. The OIDC client secrets live in their own labelled `Secret`s produced by unsealing, never in `argocd-secret`.
 13. Pin every version explicitly: the operator manifests via a `?ref=<commit-sha>` on the Kustomize base and its image via `sha256:` digest, and Argo CD via `spec.version` on the CR. Never a floating tag, never a branch ref, never `latest`. A moved tag must not be able to change what a re-render produces.
 14. The per-team root `Application` (`platform/root-apps/<team>-root-app.yaml`) is platform-owned — teams commit `Application` manifests inside the path it watches, they never edit the root `Application` object itself.
 15. Never hand-edit or ship manifests for `argocd-cm`, `argocd-rbac-cm`, `argocd-cmd-params-cm` or `argocd-secret`. They are operator-owned and reverted on reconcile. Change the `ArgoCD` CR instead; use `spec.extraConfig` only for `argocd-cm` keys the CRD genuinely doesn't expose.
 16. `spec.sourceNamespaces` on the `ArgoCD` CR is an explicit literal list of team `-apps` namespaces. Never `"*"`, never a glob (`team-*`) or regex (`/^team-.*$/`) — the operator expands both at reconcile time, so a future namespace can silently join the allowlist.
-17. Label discipline is part of the boundary: `argocd.argoproj.io/managed-by` goes only on workload namespaces; never on an `-apps` namespace; `argocd.argoproj.io/managed-by-cluster-argocd` is never written by hand. One namespace is managed by exactly one ArgoCD instance.
-18. `ARGOCD_CLUSTER_CONFIG_NAMESPACES` on the operator's manager Deployment (set by `bootstrap/operator/manager-patch.yaml`) lists only `argocd-multitenant`. Every namespace added there gets an ArgoCD instance with cluster-wide controller permissions.
+17. Label discipline is part of the boundary: `argocd.argoproj.io/managed-by` goes only on workload namespaces; never on an `-apps` namespace; `argocd.argoproj.io/managed-by-cluster-argocd` is never written by hand. One namespace is managed by exactly one ArgoCD instance — infrastructure namespaces name `argocd-infra`, team namespaces name `argocd-multitenant`, and no namespace ever names both.
+18. `ARGOCD_CLUSTER_CONFIG_NAMESPACES` on the operator's manager Deployment (set by `bootstrap/operator/manager-patch.yaml`) lists exactly `argocd-infra,argocd-multitenant` and nothing else. Every namespace added there gets an ArgoCD instance with cluster-wide controller permissions — it is a list of control planes, and a tenant namespace must never appear in it.
 19. The `ArgoCD` CR **and its front door** (`install/argocd-gateway.yaml`) stay in `install/`, outside the path `platform-root` syncs, and are applied by a platform admin. ArgoCD never self-manages its own RBAC, SSO, instance config, or the gateway you would need to reach the UI. The control plane's gateway is a separate object from the tenant gateway, never a second listener on it.
 20. The cluster runs Cilium, never Talos' default Flannel. The per-team `default-deny` policies are a core part of tenant isolation, and Flannel accepts them without enforcing them, so the failure mode is silent and total. Re-verify enforcement after any CNI change or cluster rebuild, not just after a policy change. Keep Cilium on a supported release — an EOL CNI is an EOL security boundary.
 21. Every namespace this repo creates carries explicit `pod-security.kubernetes.io/*` labels, at `baseline` or stricter. Never rely on Talos' cluster default to supply the level, never add a namespace to the PSA exemption list in the Talos machine config (that disables admission for it entirely), and never widen a namespace's level without recording the reason in the manifest.
@@ -1022,3 +1450,10 @@ workload fit without recording why.
 24. Every tenant gateway listener is per-team: a hostname wildcard under that team's own subdomain, `allowedRoutes.namespaces.selector` pinned to that team's workload namespace, and `kinds` limited to `HTTPRoute`/`GRPCRoute`. Never one shared listener with a broad selector, never `allowedRoutes.namespaces.from: All`. Gateway API breaks hostname conflicts by creation timestamp, so a shared listener makes hostname ownership a race between tenants.
 25. Teams may author `HTTPRoute` and `GRPCRoute` and nothing else from `gateway.networking.k8s.io`; `Gateway`, `TLSRoute`, `TCPRoute`, `UDPRoute` and `ReferenceGrant` are blacklisted in every team `AppProject`. `Gateway` is namespaced — `clusterResourceWhitelist: []` does not cover it. Because this is an enumeration and not a wildcard, re-review it on every Gateway API upgrade: a new namespaced kind in the group is permitted until someone adds it.
 26. `bootstrap/operator/rendered.yaml` is the only thing ever applied to the cluster for the operator, and it is always regenerated by `kustomize build`, never hand-edited — a hand-edit is erased by the next render and by the CI drift check. Equally, never `kubectl edit` the live operator `Deployment`, `ClusterRole` or CRDs: change the kustomization, re-render, re-apply.
+27. The `infra` AppProject's `clusterResourceWhitelist` is the only non-empty one in this repo. It is safe only because the instance holding it has no tenants — no `sourceNamespaces`, no team group in its RBAC, its own hostname. Never copy its shape into a team project, and never grant a tenant access to the `argocd-infra` instance or the `infra` project. Changes to `infra/projects/infra-project.yaml` and `install/argocd-infra-cr.yaml` are one review, not two.
+28. `argocd-infra` keeps `spec.sourceNamespaces` empty. Applications-in-any-namespace stays off for the infrastructure instance: every `Application` it reconciles lives in `argocd-infra`, a namespace only the platform team can write to.
+29. No team SSO group ever appears in `argocd-infra`'s `spec.rbac.policy`, and the infrastructure instance is never given a team's repository, namespace or project. The two instances share the operator and nothing else.
+30. step-ca's key material is created once, out of band, and supplied to the chart as pre-existing secrets with generation disabled. A chart-generated CA on a re-sync silently rotates the cluster's root of trust and invalidates every certificate issued from it. The material never enters Git (guardrail 12) — `infra/pki/step-ca-secrets.md` documents the procedure, never the keys.
+31. The sealed-secrets controller's private sealing key is backed up out of band, before anything is sealed, and never committed. Losing it makes every `SealedSecret` in this repo and in all team repos undecryptable simultaneously; there is no recovery except regenerating every secret. Back up the key on cluster creation and after any key rotation.
+32. `SealedSecret`s stay strict-scoped — bound to their namespace *and* name. Never seal with `--scope namespace-wide` or `--scope cluster-wide`. When the same plaintext is needed in two namespaces, seal it twice; strict scoping is what stops one tenant's sealed material from being unsealed under another tenant's namespace.
+33. Keycloak configuration — realms, clients, groups, role mappings, protocol mappers — is authored as EDP operator CRs under `infra/identity/` and never changed in the Keycloak admin console. A console edit is drift the operator may or may not revert, and it is invisible in review. This includes the group-membership mapper that puts `groups` into the token: without it, both instances' RBAC silently denies everything.
