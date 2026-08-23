@@ -9,7 +9,7 @@ metadata:
     argocd.argoproj.io/sync-wave: "8"
 spec:
   secretName: keycloak-tls
-  dnsNames: ["keycloak.example.com"]
+  dnsNames: ["keycloak-amt.lan"]
   issuerRef:
     name: step-ca-acme
     kind: ClusterIssuer
@@ -24,7 +24,7 @@ metadata:
 spec:
   instances: 1
   hostname:
-    hostname: https://keycloak.example.com
+    hostname: https://keycloak-amt.lan
   http:
     tlsSecret: keycloak-tls
   ingress:
@@ -54,7 +54,7 @@ spec:
     - name: keycloak-tls
       protocol: TLS
       port: 443
-      hostname: keycloak.example.com
+      hostname: keycloak-amt.lan
       tls:
         mode: Passthrough      # Keycloak terminates with keycloak-tls, same shape as both ArgoCDs
       allowedRoutes:
@@ -75,7 +75,7 @@ spec:
     - name: keycloak
       sectionName: keycloak-tls
   hostnames:
-    - keycloak.example.com
+    - keycloak-amt.lan
   rules:
     - backendRefs:
         - name: platform-keycloak-service

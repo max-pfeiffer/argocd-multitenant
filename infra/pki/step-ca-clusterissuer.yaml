@@ -1,6 +1,23 @@
 # The issuer every certificate in this cluster resolves back to: both control-plane gateways
 # and the per-team tenant listeners. Requires the ACME provisioner to be enabled in step-ca's
 # configuration.
+#
+# ⚠ UNRESOLVED — HTTP-01 does not work as configured, now that hostnames are internal `.lan`
+# names on per-hostname LoadBalancer IPs. step-ca validates a challenge by fetching
+# http://<hostname>/.well-known/acme-challenge/<token>. `argocd-amt.lan` must resolve to its own
+# gateway (192.168.20.246) for real traffic, so the challenge lands there on port 80 — not on the
+# solver gateway at .249, which no DNS name points to. Every certificate will fail at wave 4.
+#
+# Three ways out, in order of preference for an internal CA:
+#   1. step-issuer (smallstep's cert-manager external issuer, step-ca JWK provisioner). No
+#      challenge at all, so no DNS or port-80 reachability needed. Adds one component.
+#   2. DNS-01, if the `.lan` zone has an API cert-manager supports (RFC2136/BIND, etc.).
+#      Also the only option that can issue the tenant wildcards.
+#   3. Keep HTTP-01 but add an HTTP :80 listener to each gateway that owns a hostname, and give
+#      this issuer one solver per gateway with `selector.dnsNames`. Frees .249 back to spare.
+#      Note this cannot issue wildcard certificates, which the tenant listeners need.
+#
+# Option 3 alone is insufficient because of the wildcards — realistically it is 1 or 2.
 apiVersion: cert-manager.io/v1
 kind: ClusterIssuer
 metadata:

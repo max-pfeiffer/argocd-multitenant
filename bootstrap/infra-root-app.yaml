@@ -8,7 +8,7 @@ metadata:
 spec:
   project: infra
   source:
-    repoURL: https://git.example.com/platform/argocd-multitenant.git
+    repoURL: https://github.com/max-pfeiffer/argocd-multitenant
     targetRevision: main
     path: infra
     directory:

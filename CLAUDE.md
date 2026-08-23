@@ -88,7 +88,7 @@ One argocd-operator, two `ArgoCD` custom resources. They share nothing else.
 | `spec.sourceNamespaces` | the three team `-apps` namespaces | **empty** — every `Application` lives in `argocd-infra` |
 | Cluster-scoped resources | forbidden to tenants (`clusterResourceWhitelist: []`) | permitted — that is its entire job |
 | Who can log in | `platform-admins` + the three team groups | `platform-admins` only |
-| Host | `argocd.example.com` | `argocd-infra.example.com` |
+| Host | `argocd-amt.lan` | `argocd-infra-amt.lan` |
 | Installed | second | **first** |
 
 The isolation is not a matter of trust or naming. It rests on five mechanisms:
@@ -407,7 +407,7 @@ spec:
 
   oidcConfig: |
     name: Corp SSO
-    issuer: https://idp.example.com/
+    issuer: https://keycloak-amt.lan/
     clientID: argocd
     clientSecret: $argocd-oidc:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
@@ -440,7 +440,7 @@ spec:
   server:
     insecure: false                         # TLS terminates properly, no plaintext server mode
     replicas: 1
-    host: argocd.example.com                # still set: the operator derives argocd-cm's `url` from it
+    host: argocd-amt.lan                # still set: the operator derives argocd-cm's `url` from it
     ingress:
       enabled: false                        # exposure is via Gateway API — see install/argocd-gateway.yaml
     # No `route:` block — that field is OpenShift-only (guardrail 22).
@@ -458,10 +458,10 @@ but with `ingress.enabled: false` that derivation is worth checking rather than 
 OIDC redirect in a way that looks like an IdP problem:
 
 ```bash
-kubectl -n argocd-multitenant get cm argocd-cm -o jsonpath='{.data.url}'   # expect https://argocd.example.com
+kubectl -n argocd-multitenant get cm argocd-cm -o jsonpath='{.data.url}'   # expect https://argocd-amt.lan
 ```
 
-If it is empty or the in-cluster service name, set it via `spec.extraConfig: {url: https://argocd.example.com}`. That is
+If it is empty or the in-cluster service name, set it via `spec.extraConfig: {url: https://argocd-amt.lan}`. That is
 a legitimate use of the escape hatch under guardrail 15 — with both `ingress` and `route` disabled the CRD exposes no
 other way to state it.
 
@@ -537,7 +537,7 @@ spec:
 
   oidcConfig: |                             # added after Keycloak is up — see the ordering below
     name: Corp SSO
-    issuer: https://keycloak.example.com/realms/platform
+    issuer: https://keycloak-amt.lan/realms/platform
     clientID: argocd-infra
     clientSecret: $argocd-infra-oidc:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
@@ -555,7 +555,7 @@ spec:
 
   server:
     insecure: false
-    host: argocd-infra.example.com
+    host: argocd-infra-amt.lan
     ingress:
       enabled: false                        # Gateway API, same as the other instance
 
@@ -593,7 +593,7 @@ metadata:
 spec:
   description: Cluster infrastructure. Platform-only — no tenant ever has access to this project.
   sourceRepos:
-    - https://git.example.com/platform/argocd-multitenant.git    # this repo, for infra/ manifests
+    - https://github.com/max-pfeiffer/argocd-multitenant    # this repo, for infra/ manifests
     - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
     - https://charts.jetstack.io
     - https://smallstep.github.io/helm-charts/
@@ -802,6 +802,14 @@ spec:
 This requires the ACME provisioner to be enabled in step-ca's configuration. Every `certificateRefs` in this repo —
 both instances' gateways and the tenant listeners — resolves back to this issuer.
 
+> **Open issue: HTTP-01 does not survive internal `.lan` names on per-hostname LoadBalancer IPs.** step-ca validates by
+> fetching `http://<hostname>/.well-known/acme-challenge/<token>`. `argocd-amt.lan` has to resolve to its own gateway
+> (`192.168.20.246`) for real traffic, so the challenge arrives there on port 80 — not at the solver gateway on `.249`,
+> which nothing resolves to. On top of that, HTTP-01 cannot issue the wildcard certificates the tenant listeners need.
+> The realistic fixes are **step-issuer** (smallstep's cert-manager external issuer against step-ca's JWK provisioner —
+> no challenge, no DNS dependency) or **DNS-01** if the `.lan` zone has an API cert-manager supports. Both are decisions
+> about your DNS setup, so this file does not pick one; nothing else in the bootstrap is blocked until wave 4.
+
 ## Exposing ArgoCD and team workloads (Gateway API)
 
 Cilium implements Gateway API, so nothing here uses `Ingress`. There are **two** gateways on purpose, and the split is the
@@ -841,7 +849,7 @@ spec:
     - name: argocd-tls
       protocol: TLS
       port: 443
-      hostname: argocd.example.com
+      hostname: argocd-amt.lan
       tls:
         mode: Passthrough                 # argocd-server presents its own cert
       allowedRoutes:
@@ -860,7 +868,7 @@ spec:
     - name: argocd
       sectionName: argocd-tls
   hostnames:
-    - argocd.example.com
+    - argocd-amt.lan
   rules:
     - backendRefs:
         - name: argocd-server
@@ -910,7 +918,7 @@ spec:
     - name: team-a
       protocol: HTTPS
       port: 443
-      hostname: "*.team-a.apps.example.com"    # team-a can only ever claim names under its own subdomain
+      hostname: "*.team-a-amt.lan"    # team-a can only ever claim names under its own subdomain
       tls:
         mode: Terminate
         certificateRefs:
@@ -928,7 +936,7 @@ spec:
 
 **Why per-team listeners rather than one wildcard listener with `from: Selector` over all teams:** Gateway API resolves
 conflicting hostnames between routes by creation timestamp — oldest wins. On a shared listener, team-b committing an
-`HTTPRoute` for `shop.apps.example.com` before team-a does simply takes the hostname, and if team-a already had it, a
+`HTTPRoute` for `shop.apps-amt.lan` before team-a does simply takes the hostname, and if team-a already had it, a
 later team can still attach overlapping path rules. Binding each team to a listener whose hostname is a wildcard under
 *their own* subdomain removes the shared namespace entirely: there is nothing to race for. This is the Gateway API
 analogue of exact-match `sourceRepos` — the boundary is in the platform-owned object, not in what the team writes.
@@ -947,7 +955,7 @@ spec:
       namespace: tenant-gateway
       sectionName: team-a               # their listener
   hostnames:
-    - checkout.team-a.apps.example.com  # must fall under the listener's wildcard
+    - checkout.team-a-amt.lan  # must fall under the listener's wildcard
   rules:
     - backendRefs:
         - name: checkout-service
@@ -1193,7 +1201,7 @@ metadata:
 spec:
   description: Platform-owned config from the argocd-multitenant repo
   sourceRepos:
-    - https://git.example.com/platform/argocd-multitenant.git   # exact match, this repo only
+    - https://github.com/max-pfeiffer/argocd-multitenant   # exact match, this repo only
   destinations:
     - server: https://kubernetes.default.svc
       namespace: "*"                  # platform-owned: creates team namespaces and control-plane objects
@@ -1283,7 +1291,7 @@ metadata:
 spec:
   project: platform                     # dedicated platform project, never "default"
   source:
-    repoURL: https://git.example.com/platform/argocd-multitenant.git
+    repoURL: https://github.com/max-pfeiffer/argocd-multitenant
     targetRevision: main
     path: platform
     directory:

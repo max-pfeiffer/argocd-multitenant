@@ -18,7 +18,7 @@ spec:
 
   oidcConfig: |                             # added after Keycloak is up — see the bootstrap order
     name: Corp SSO
-    issuer: https://keycloak.example.com/realms/platform
+    issuer: https://keycloak-amt.lan/realms/platform
     clientID: argocd-infra
     clientSecret: $argocd-infra-oidc:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
@@ -37,7 +37,7 @@ spec:
   server:
     insecure: false
     replicas: 1
-    host: argocd-infra.example.com
+    host: argocd-infra-amt.lan
     ingress:
       enabled: false                        # Gateway API, same as the other instance
 

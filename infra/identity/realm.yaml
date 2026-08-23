@@ -11,7 +11,7 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "9"
 spec:
-  url: https://keycloak.example.com
+  url: https://keycloak-amt.lan
   secret: keycloak-admin-credentials      # SealedSecret in the operator's namespace
 ---
 apiVersion: v1.edp.epam.com/v1
@@ -24,4 +24,4 @@ spec:
   clusterKeycloakRef: platform-keycloak
   realmName: platform
   # The issuer both ArgoCD instances point at is:
-  #   https://keycloak.example.com/realms/platform
+  #   https://keycloak-amt.lan/realms/platform

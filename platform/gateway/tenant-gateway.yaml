@@ -21,7 +21,7 @@ spec:
     - name: team-a
       protocol: HTTPS
       port: 443
-      hostname: "*.team-a.apps.example.com"    # team-a can only ever claim names under its own subdomain
+      hostname: "*.team-a-amt.lan"    # team-a can only ever claim names under its own subdomain
       tls:
         mode: Terminate
         certificateRefs:
@@ -37,7 +37,7 @@ spec:
     - name: team-b
       protocol: HTTPS
       port: 443
-      hostname: "*.team-b.apps.example.com"
+      hostname: "*.team-b-amt.lan"
       tls:
         mode: Terminate
         certificateRefs:
@@ -53,7 +53,7 @@ spec:
     - name: team-c
       protocol: HTTPS
       port: 443
-      hostname: "*.team-c.apps.example.com"
+      hostname: "*.team-c-amt.lan"
       tls:
         mode: Terminate
         certificateRefs:
@@ -76,7 +76,7 @@ metadata:
   namespace: tenant-gateway
 spec:
   secretName: team-a-apps-tls
-  dnsNames: ["*.team-a.apps.example.com"]
+  dnsNames: ["*.team-a-amt.lan"]
   issuerRef:
     name: step-ca-acme
     kind: ClusterIssuer
@@ -88,7 +88,7 @@ metadata:
   namespace: tenant-gateway
 spec:
   secretName: team-b-apps-tls
-  dnsNames: ["*.team-b.apps.example.com"]
+  dnsNames: ["*.team-b-amt.lan"]
   issuerRef:
     name: step-ca-acme
     kind: ClusterIssuer
@@ -100,7 +100,7 @@ metadata:
   namespace: tenant-gateway
 spec:
   secretName: team-c-apps-tls
-  dnsNames: ["*.team-c.apps.example.com"]
+  dnsNames: ["*.team-c-amt.lan"]
   issuerRef:
     name: step-ca-acme
     kind: ClusterIssuer

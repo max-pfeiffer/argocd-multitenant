@@ -12,10 +12,11 @@ spec:
     chart: cert-manager
     targetRevision: v1.21.1
     helm:
-      values: |
-        # Newer charts renamed this from `installCRDs`. Verify against v1.21.1's values.yaml.
+      valuesObject:
         crds:
           enabled: true
+        extraArgs:
+          - "--enable-gateway-api"
   destination:
     server: https://kubernetes.default.svc
     namespace: cert-manager

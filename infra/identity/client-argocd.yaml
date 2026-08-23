@@ -15,9 +15,9 @@ spec:
   secret: argocd-oidc-client-secret        # SealedSecret in THIS namespace. The same plaintext is
                                            #   sealed again for argocd-multitenant, where Argo CD
                                            #   resolves $argocd-oidc:clientSecret (guardrail 32).
-  webUrl: https://argocd.example.com
+  webUrl: https://argocd-amt.lan
   redirectUris:
-    - https://argocd.example.com/auth/callback
+    - https://argocd-amt.lan/auth/callback
   directAccess: false
   # THE ONE THAT WASTES AN AFTERNOON: Argo CD's scopes: "[groups]" needs a groups claim in the
   # ID token, and Keycloak does not emit one by default. Without this mapper, login succeeds, the

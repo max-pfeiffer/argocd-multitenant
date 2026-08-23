@@ -54,12 +54,12 @@ goes wrong, because Claude will happily leave `example.com` in place and it look
 | Value | Lands in | How to get it |
 |---|---|---|
 | kubectl context | every cluster command | fixed: **`admin@argocd-multitenant`** |
-| Git URL of **this** repo | `platform/projects/platform-project.yaml`, `bootstrap/root-app.yaml` | your Git host |
+| Git URL of **this** repo | `platform/projects/platform-project.yaml`, `infra/projects/infra-project.yaml`, both root apps | fixed: **`https://github.com/max-pfeiffer/argocd-multitenant`** (public) |
 | Git URL of each team's app repo | `platform/projects/<team>-project.yaml`, `platform/root-apps/<team>-root-app.yaml` | the teams; exact URLs, they are an allowlist (guardrail 5) |
 | Team names | everywhere | default is `team-a`/`team-b`/`team-c` |
-| ArgoCD hostname | CR `spec.server.host`, `install/argocd-gateway.yaml`, its certificate | you |
-| Team hostname pattern | tenant gateway listeners | pick a per-team subdomain, e.g. `*.<team>.apps.example.com` (guardrail 24) |
-| OIDC issuer URL + client ID | CR `spec.oidcConfig` | your IdP |
+| ArgoCD hostname | CR `spec.server.host`, `install/argocd-gateway.yaml`, its certificate | fixed: **`argocd-amt.lan`** |
+| Team hostname pattern | tenant gateway listeners | fixed: **`*.<team>-amt.lan`** (guardrail 24) |
+| OIDC issuer URL + client ID | CR `spec.oidcConfig` | fixed: **`https://keycloak-amt.lan/realms/platform`**, clients `argocd` and `argocd-infra` |
 | IdP group names | CR `spec.rbac.policy` | your IdP — `platform-admins` plus one per team |
 | cert-manager `ClusterIssuer` name | gateway certificates | your cluster |
 | `StorageClass` name | only manifests that request a PVC | `kubectl get sc` |
@@ -68,10 +68,10 @@ goes wrong, because Claude will happily leave `example.com` in place and it look
 | Argo CD version | CR `spec.version` | the operator's compatibility matrix for the operator version above |
 | Per-team quota sizing | `platform/namespaces/<team>.yaml` | capacity planning |
 | **Infrastructure instance** | | |
-| `argocd-infra` hostname | `install/argocd-infra-cr.yaml`, its gateway | you |
+| `argocd-infra` hostname | `install/argocd-infra-cr.yaml`, its gateway | fixed: **`argocd-infra-amt.lan`** |
 | LB address pool | `infra/network/cilium-lb-ippool.yaml` | fixed: **192.168.20.245–249**. Five addresses, four already spoken for — see the allocation table in CLAUDE.md |
 | NFS server address + export path | `infra/apps/csi-driver-nfs.yaml`, the `StorageClass` | your storage |
-| Keycloak hostname + realm name | `infra/apps/keycloak.yaml`; the `issuer` in **both** CRs' `oidcConfig` | you |
+| Keycloak hostname + realm name | `infra/apps/keycloak.yaml`; the `issuer` in **both** CRs' `oidcConfig` | fixed: **`keycloak-amt.lan`**, realm `platform` |
 | step-ca root/intermediate key material | pre-existing secrets, created out of band | your secret manager — **never chart-generated**, guardrail 30 |
 | Chart versions | each `infra/apps/*.yaml` `targetRevision` | given: cert-manager `v1.21.1`, step-certificates `1.30.1`. Pin the rest yourself |
 | CloudNativePG chart version | `infra/apps/cloudnative-pg.yaml` | given: **v0.27.1** |

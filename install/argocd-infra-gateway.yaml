@@ -13,7 +13,7 @@ spec:
     - name: argocd-infra-tls
       protocol: TLS
       port: 443
-      hostname: argocd-infra.example.com
+      hostname: argocd-infra-amt.lan
       tls:
         mode: Passthrough                 # argocd-server presents its own cert
       allowedRoutes:
@@ -32,7 +32,7 @@ spec:
     - name: argocd-infra
       sectionName: argocd-infra-tls
   hostnames:
-    - argocd-infra.example.com
+    - argocd-infra-amt.lan
   rules:
     - backendRefs:
         - name: argocd-infra-server

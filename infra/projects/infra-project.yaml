@@ -10,7 +10,7 @@ metadata:
 spec:
   description: Cluster infrastructure. Platform-only — no tenant ever has access to this project.
   sourceRepos:
-    - https://git.example.com/platform/argocd-multitenant.git    # this repo, for infra/ manifests
+    - https://github.com/max-pfeiffer/argocd-multitenant    # this repo, for infra/ manifests
     - https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
     - https://charts.jetstack.io
     - https://smallstep.github.io/helm-charts/

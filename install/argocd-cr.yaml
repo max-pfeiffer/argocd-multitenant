@@ -24,7 +24,7 @@ spec:
 
   oidcConfig: |
     name: Corp SSO
-    issuer: https://keycloak.example.com/realms/platform
+    issuer: https://keycloak-amt.lan/realms/platform
     clientID: argocd
     clientSecret: $argocd-oidc:clientSecret
     requestedScopes: ["openid", "profile", "email", "groups"]
@@ -57,7 +57,7 @@ spec:
   server:
     insecure: false                         # TLS terminates properly, no plaintext server mode
     replicas: 1
-    host: argocd.example.com                # still set: the operator derives argocd-cm's `url` from it
+    host: argocd-amt.lan                # still set: the operator derives argocd-cm's `url` from it
     ingress:
       enabled: false                        # exposure is via Gateway API — see install/argocd-gateway.yaml
     # No `route:` block — that field is OpenShift-only (guardrail 22).
