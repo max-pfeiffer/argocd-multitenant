@@ -19,7 +19,8 @@ API or rely on an OpenShift default. Concretely:
   and `spec.server.route`; `route` is OpenShift-only (guardrail 22) and `ingress` is left disabled because this cluster
   exposes everything through Gateway API instead. See "Exposing ArgoCD and team workloads (Gateway API)".
 - **No SecurityContextConstraints, no `oc`.** Pod-level hardening comes from Pod Security Admission, not SCCs. Every
-  command in this file is plain `kubectl`; cluster-admin access comes from `talosctl kubeconfig`.
+  command in this file is plain `kubectl`; cluster-admin access comes from `talosctl kubeconfig`. **Every `kubectl`
+  command in this file assumes the context `admin@argocd-multitenant`** — see below.
 - **Talos enforces Pod Security Admission cluster-wide.** Talos configures the API server with a default
   `PodSecurityConfiguration` (`enforce: baseline`, `audit`/`warn: restricted`) that exempts only `kube-system`, so every
   namespace this repo creates is already at `baseline` whether or not it says so. We still label namespaces explicitly, so
@@ -120,6 +121,24 @@ There is deliberately **no `platform/config/` directory** any more: `argocd-cm`,
 are operator-managed and must not be shipped as standalone manifests. Their content lives in `install/argocd-cr.yaml`.
 
 If this structure doesn't exist yet, create it — it's the layout all instructions below assume.
+`docs/scaffolding-with-claude.md` is the runbook for doing that from scratch: the values to decide up front, the
+phase-by-phase prompts, and — importantly — the bootstrap ordering, which is circular and easy to get wrong.
+
+## The kubectl context
+
+Everything applied by hand in this repo — the operator, the `ArgoCD` CR, the control-plane gateway, the one-time bootstrap
+applies — goes to the **`admin@argocd-multitenant`** context:
+
+```bash
+kubectl config use-context admin@argocd-multitenant
+kubectl config current-context          # confirm before every apply in this file
+```
+
+Prefer confirming the context over trusting whatever `current-context` happens to be. The manifests here are not
+namespace-scoped nuisances if they land somewhere unintended: `bootstrap/operator/rendered.yaml` installs a cluster-wide
+operator with broad RBAC, and `--server-side --force-conflicts` will take ownership of fields on any CRDs it finds. On a
+cluster that already runs a different Argo CD, that is a bad afternoon. Where a command is destructive or hard to
+reverse, pass `--context admin@argocd-multitenant` explicitly rather than relying on ambient state.
 
 ## Installing the argocd-operator
 
